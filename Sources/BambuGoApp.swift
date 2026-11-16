@@ -102,6 +102,14 @@ struct ContentView: View {
             Spacer()
             Button("Aggiorna") { store.refresh() }
                 .disabled(store.state != .connected)
+            Button {
+                if let url = URL(string: "https://www.paypal.me/lorenzogarbi") {
+                    NSWorkspace.shared.open(url)
+                }
+            } label: {
+                Text("☕")
+            }
+            .help("Offrimi un caffè su PayPal")
             Button("Esci") { NSApp.terminate(nil) }
         }
         .controlSize(.small)

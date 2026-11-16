@@ -1,5 +1,7 @@
 # BambuGo
 
+[![Offrimi un caffè](https://img.shields.io/badge/☕_Offrimi_un_caffè-PayPal-0070ba?logo=paypal&logoColor=white)](https://www.paypal.me/lorenzogarbi)
+
 App per la barra dei menu di macOS che mostra lo stato di una stampante Bambu Lab
 (X1, P1, A1, H2D…), collegandosi **via cloud Bambu Lab** oppure **direttamente in rete locale**.
 
@@ -60,3 +62,8 @@ Password dell'account mai salvata; token e access code stanno nel Portachiavi.
 - Le API cloud non sono ufficiali e Bambu può cambiarle; l'app evita richieste frequenti.
 - In rete locale, P1/A1 accettano poche connessioni MQTT contemporanee.
 - L'app legge solo lo stato, non invia comandi di stampa.
+
+## Supporto
+
+Se BambuGo ti è utile, puoi offrirmi un caffè su PayPal: https://www.paypal.me/lorenzogarbi ☕
+(anche dal pulsante ☕ in fondo al pannello dell'app).
