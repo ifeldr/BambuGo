@@ -14,7 +14,7 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
 BINARIES=()
 for ARCH in arm64 x86_64; do
-    echo "→ Compilo per $ARCH…"
+    echo "→ Compilo per ${ARCH}..."
     swiftc -O -parse-as-library \
         -target "$ARCH-apple-macos13.0" \
         Sources/*.swift \
