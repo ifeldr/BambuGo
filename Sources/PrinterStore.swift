@@ -207,40 +207,38 @@ struct AMSUnit: Identifiable {
     let trays: [AMSTray]
 }
 
-enum ConnectionMode: String, CaseIterable, Identifiable {
-    case cloud
-    case lan
+/// Modelli noti, dai prefissi del numero di serie e dai codici interni.
+enum PrinterModels {
+    static func fromSerial(_ serial: String) -> String? {
+        let prefixes: [String: String] = [
+            "00M": "X1C", "00W": "X1", "03W": "X1E",
+            "01S": "P1P", "01P": "P1S",
+            "030": "A1 mini", "039": "A1",
+            "094": "H2D",
+        ]
+        return prefixes[String(serial.uppercased().prefix(3))]
+    }
 
-    var id: String { rawValue }
-    var label: String { self == .cloud ? "Cloud" : "Rete locale" }
-}
-
-enum LoginStep: Equatable {
-    case credentials
-    case emailCode
-    case tfa(String)
+    static func fromCode(_ code: String) -> String? {
+        let codes: [String: String] = [
+            "BL-P001": "X1C", "BL-P002": "X1", "C13": "X1E",
+            "C11": "P1P", "C12": "P1S",
+            "N1": "A1 mini", "N2S": "A1",
+            "O1D": "H2D",
+        ]
+        return codes[code.uppercased()]
+    }
 }
 
 @MainActor
 final class PrinterStore: ObservableObject {
-    // Modalità
-    @Published private(set) var mode: ConnectionMode
-
-    // Rete locale
-    @Published private(set) var lanHost: String
-    @Published private(set) var lanSerial: String
-    @Published private(set) var lanAccessCode: String
-
-    // Account cloud
-    @Published private(set) var region: CloudRegion
-    @Published private(set) var email: String
+    // Configurazione (solo rete locale)
+    @Published private(set) var host: String
     @Published private(set) var serial: String
-    @Published private(set) var printerName: String
+    @Published private(set) var accessCode: String
+    @Published private(set) var customName: String
+    @Published private(set) var detectedModel: String
     @Published private(set) var notificationsEnabled: Bool
-    @Published private(set) var devices: [CloudDevice] = []
-    @Published private(set) var loginStep: LoginStep = .credentials
-    @Published private(set) var busy = false
-    @Published var loginError: String?
     @Published private(set) var loginItemError: String?
 
     // Stato stampante
@@ -249,8 +247,6 @@ final class PrinterStore: ObservableObject {
     @Published private(set) var hasData = false
     @Published private(set) var lastUpdate: Date?
 
-    private var token: String?
-    private var mqttUsername: String
     private var raw: [String: Any] = [:]
     private var client: MQTTClient?
     private let defaults = UserDefaults.standard
@@ -258,185 +254,47 @@ final class PrinterStore: ObservableObject {
 
     init() {
         let defaults = UserDefaults.standard
-        mode = ConnectionMode(rawValue: defaults.string(forKey: "mode") ?? "") ?? .cloud
-        lanHost = defaults.string(forKey: "lanHost") ?? ""
-        lanSerial = defaults.string(forKey: "lanSerial") ?? ""
-        lanAccessCode = Keychain.get("lanAccessCode") ?? ""
-        region = CloudRegion(rawValue: defaults.string(forKey: "region") ?? "") ?? .global
-        email = defaults.string(forKey: "email") ?? ""
-        serial = defaults.string(forKey: "serial") ?? ""
-        printerName = defaults.string(forKey: "printerName") ?? ""
-        mqttUsername = defaults.string(forKey: "mqttUsername") ?? ""
+        host = defaults.string(forKey: "lanHost") ?? ""
+        serial = defaults.string(forKey: "lanSerial") ?? ""
+        accessCode = Keychain.get("lanAccessCode") ?? ""
+        customName = defaults.string(forKey: "customName") ?? ""
+        detectedModel = defaults.string(forKey: "printerModel") ?? ""
         notificationsEnabled = defaults.object(forKey: "notifications") as? Bool ?? true
-        token = Keychain.get("token")
+
+        // Pulizia dei dati della vecchia modalità cloud.
+        if defaults.object(forKey: "mode") != nil || defaults.object(forKey: "mqttUsername") != nil {
+            Keychain.set(nil, for: "token")
+            for key in ["mode", "region", "email", "serial", "printerName", "mqttUsername"] {
+                defaults.removeObject(forKey: key)
+            }
+        }
 
         UNUserNotificationCenter.current().delegate = notificationDelegate
         if notificationsEnabled { requestNotificationPermission() }
 
         connect()
-        if isLoggedIn {
-            Task { await self.refreshDevices(silent: true) }
-        }
     }
 
-    // MARK: - Modalità e rete locale
+    // MARK: - Configurazione
 
-    func setMode(_ newMode: ConnectionMode) {
-        guard newMode != mode else { return }
-        mode = newMode
-        defaults.set(newMode.rawValue, forKey: "mode")
-        loginError = nil
+    var isConfigured: Bool { !host.isEmpty && !serial.isEmpty && !accessCode.isEmpty }
+
+    func save(host: String, serial: String, accessCode: String, name: String, model: String? = nil) {
+        let newSerial = serial.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        if newSerial != self.serial {
+            detectedModel = ""
+        }
+        self.host = host.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.serial = newSerial
+        self.accessCode = accessCode.trimmingCharacters(in: .whitespacesAndNewlines)
+        customName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let model, !model.isEmpty { detectedModel = model }
+        defaults.set(self.host, forKey: "lanHost")
+        defaults.set(self.serial, forKey: "lanSerial")
+        defaults.set(customName, forKey: "customName")
+        defaults.set(detectedModel, forKey: "printerModel")
+        Keychain.set(self.accessCode, for: "lanAccessCode")
         connect()
-    }
-
-    var isLANConfigured: Bool { !lanHost.isEmpty && !lanSerial.isEmpty && !lanAccessCode.isEmpty }
-
-    func saveLAN(host: String, serial: String, accessCode: String) {
-        lanHost = host.trimmingCharacters(in: .whitespacesAndNewlines)
-        lanSerial = serial.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        lanAccessCode = accessCode.trimmingCharacters(in: .whitespacesAndNewlines)
-        defaults.set(lanHost, forKey: "lanHost")
-        defaults.set(lanSerial, forKey: "lanSerial")
-        Keychain.set(lanAccessCode, for: "lanAccessCode")
-        loginError = nil
-        connect()
-    }
-
-    /// Seriale e access code della stampante scelta nel cloud, per precompilare la rete locale.
-    var cloudDeviceForLAN: CloudDevice? {
-        devices.first(where: { $0.id == serial }) ?? (devices.count == 1 ? devices.first : nil)
-    }
-
-    private var cloud: BambuCloud { BambuCloud(region: region) }
-
-    var isLoggedIn: Bool { !(token ?? "").isEmpty && !mqttUsername.isEmpty }
-    var isCloudConfigured: Bool { isLoggedIn && !serial.isEmpty }
-    var isConfigured: Bool { mode == .cloud ? isCloudConfigured : isLANConfigured }
-    private var activeSerial: String { mode == .cloud ? serial : lanSerial }
-
-    // MARK: - Login cloud
-
-    func login(email: String, password: String, region: CloudRegion) async {
-        let email = email.trimmingCharacters(in: .whitespacesAndNewlines)
-        self.region = region
-        defaults.set(region.rawValue, forKey: "region")
-        self.email = email
-        defaults.set(email, forKey: "email")
-
-        busy = true
-        loginError = nil
-        defer { busy = false }
-        do {
-            switch try await cloud.login(email: email, password: password) {
-            case .success(let token):
-                try await finishLogin(token: token)
-            case .needsEmailCode:
-                lastCodeSent = Date()
-                loginStep = .emailCode
-            case .needsTFA(let key):
-                loginStep = .tfa(key)
-            }
-        } catch {
-            loginError = error.localizedDescription
-        }
-    }
-
-    func submitCode(_ code: String) async {
-        let code = String(code.filter(\.isNumber))
-        busy = true
-        loginError = nil
-        defer { busy = false }
-        do {
-            let token: String
-            switch loginStep {
-            case .emailCode: token = try await cloud.login(email: email, code: code)
-            case .tfa(let key): token = try await cloud.login(tfaKey: key, code: code)
-            case .credentials: return
-            }
-            try await finishLogin(token: token)
-        } catch {
-            loginError = error.localizedDescription
-        }
-    }
-
-    @Published private(set) var lastCodeSent: Date?
-
-    func resendCode() async {
-        busy = true
-        defer { busy = false }
-        do {
-            try await cloud.sendEmailCode(email: email)
-            lastCodeSent = Date()
-            loginError = "Nuovo codice inviato a \(email). Usa solo l'ultimo: i precedenti non valgono più."
-        } catch {
-            loginError = error.localizedDescription
-        }
-    }
-
-    func cancelLogin() {
-        loginStep = .credentials
-        loginError = nil
-    }
-
-    private func finishLogin(token: String) async throws {
-        let username = try await cloud.mqttUsername(token: token)
-        self.token = token
-        Keychain.set(token, for: "token")
-        mqttUsername = username
-        defaults.set(username, forKey: "mqttUsername")
-        loginStep = .credentials
-
-        devices = try await cloud.devices(token: token)
-        if let current = devices.first(where: { $0.id == serial }) {
-            select(current)
-        } else if devices.count == 1, let only = devices.first {
-            select(only)
-        } else {
-            serial = ""
-            defaults.removeObject(forKey: "serial")
-            if devices.isEmpty { loginError = "Nessuna stampante associata a questo account." }
-            connect()
-        }
-    }
-
-    func refreshDevices(silent: Bool = false) async {
-        guard let token, isLoggedIn else { return }
-        do {
-            devices = try await cloud.devices(token: token)
-            if let current = devices.first(where: { $0.id == serial }), current.name != printerName {
-                printerName = current.name
-                defaults.set(current.name, forKey: "printerName")
-            }
-        } catch let error as CloudError where error.isUnauthorized {
-            sessionExpired()
-        } catch {
-            if !silent { loginError = error.localizedDescription }
-        }
-    }
-
-    func select(_ device: CloudDevice) {
-        serial = device.id
-        printerName = device.name
-        defaults.set(serial, forKey: "serial")
-        defaults.set(printerName, forKey: "printerName")
-        connect()
-    }
-
-    func logout() {
-        client?.stop()
-        client = nil
-        token = nil
-        Keychain.set(nil, for: "token")
-        mqttUsername = ""
-        defaults.removeObject(forKey: "mqttUsername")
-        devices = []
-        loginStep = .credentials
-        connect()
-    }
-
-    private func sessionExpired() {
-        logout()
-        loginError = "Sessione scaduta: accedi di nuovo."
     }
 
     func setNotifications(_ enabled: Bool) {
@@ -466,20 +324,14 @@ final class PrinterStore: ObservableObject {
         status = PrintStatus()
         hasData = false
         lastUpdate = nil
+        commandMessage = nil
+        pendingCommand = nil
 
-        let newClient: MQTTClient
-        let clientID = "bambugo-\(UUID().uuidString.prefix(8))"
-        switch mode {
-        case .cloud:
-            guard isCloudConfigured, let token else { state = .notConfigured; return }
-            newClient = MQTTClient(host: region.mqttHost, username: mqttUsername, password: token,
-                                   clientID: clientID, subscribeTopic: "device/\(serial)/report")
-        case .lan:
-            guard isLANConfigured else { state = .notConfigured; return }
-            newClient = MQTTClient(host: lanHost, username: "bblp", password: lanAccessCode,
-                                   clientID: clientID, subscribeTopic: "device/\(lanSerial)/report",
+        guard isConfigured else { state = .notConfigured; return }
+        let newClient = MQTTClient(host: host, username: "bblp", password: accessCode,
+                                   clientID: "bambugo-\(UUID().uuidString.prefix(8))",
+                                   subscribeTopic: "device/\(serial)/report",
                                    allowSelfSigned: true)
-        }
         state = .connecting
 
         newClient.onStateChange = { [weak self, weak newClient] connected, error in
@@ -488,6 +340,7 @@ final class PrinterStore: ObservableObject {
                 if connected {
                     self.state = .connected
                     self.refresh()
+                    self.requestVersion()
                 } else {
                     self.state = .error(error ?? "Disconnesso")
                 }
@@ -496,12 +349,8 @@ final class PrinterStore: ObservableObject {
         newClient.onAuthRejected = { [weak self, weak newClient] in
             Task { @MainActor in
                 guard let self, let newClient, self.client === newClient else { return }
-                if self.mode == .cloud {
-                    self.sessionExpired()
-                } else {
-                    self.client = nil
-                    self.state = .error("Access code errato")
-                }
+                self.client = nil
+                self.state = .error("Access code errato: controllalo sul display della stampante.")
             }
         }
         newClient.onMessage = { [weak self, weak newClient] _, data in
@@ -514,10 +363,18 @@ final class PrinterStore: ObservableObject {
         newClient.start()
     }
 
+    private func publish(_ json: String) {
+        client?.publish(topic: "device/\(serial)/request", payload: Data(json.utf8))
+    }
+
     /// Chiede alla stampante di inviare lo stato completo.
     func refresh() {
-        let payload = #"{"pushing":{"sequence_id":"0","command":"pushall","version":1,"push_target":1}}"#
-        client?.publish(topic: "device/\(activeSerial)/request", payload: Data(payload.utf8))
+        publish(#"{"pushing":{"sequence_id":"0","command":"pushall","version":1,"push_target":1}}"#)
+    }
+
+    /// Chiede i moduli installati, per riconoscere il modello.
+    private func requestVersion() {
+        publish(#"{"info":{"sequence_id":"0","command":"get_version"}}"#)
     }
 
     // MARK: - Comandi
@@ -530,19 +387,17 @@ final class PrinterStore: ObservableObject {
     func stop() { sendPrintCommand("stop") }
 
     func setLight(_ on: Bool) {
-        let mode = on ? "on" : "off"
-        let json = #"{"system":{"sequence_id":"0","command":"ledctrl","led_node":"chamber_light","led_mode":""# + mode
-            + #"","led_on_time":500,"led_off_time":500,"loop_times":0,"interval_time":0}}"#
         guard state == .connected else { return }
-        client?.publish(topic: "device/\(activeSerial)/request", payload: Data(json.utf8))
+        let mode = on ? "on" : "off"
+        publish(#"{"system":{"sequence_id":"0","command":"ledctrl","led_node":"chamber_light","led_mode":""# + mode
+                + #"","led_on_time":500,"led_off_time":500,"loop_times":0,"interval_time":0}}"#)
         status.lightOn = on   // aggiornamento ottimistico
         raw["lights_report"] = [["node": "chamber_light", "mode": mode]]
     }
 
     private func sendPrintCommand(_ command: String) {
         guard state == .connected else { return }
-        let json = #"{"print":{"sequence_id":"0","command":""# + command + #"","param":""}}"#
-        client?.publish(topic: "device/\(activeSerial)/request", payload: Data(json.utf8))
+        publish(#"{"print":{"sequence_id":"0","command":""# + command + #"","param":""}}"#)
         commandMessage = nil
         pendingCommand = command
         let sent = command
@@ -550,7 +405,7 @@ final class PrinterStore: ObservableObject {
             try? await Task.sleep(nanoseconds: 10_000_000_000)
             if self.pendingCommand == sent {
                 self.pendingCommand = nil
-                self.commandMessage = "La stampante non ha risposto al comando. Con il firmware recente il controllo da app di terze parti può richiedere la modalità LAN + sviluppatore."
+                self.commandMessage = "La stampante non ha risposto al comando. Con i firmware recenti attiva la modalità LAN e la modalità sviluppatore sul display."
             }
             self.refresh()
         }
@@ -569,9 +424,29 @@ final class PrinterStore: ObservableObject {
         }
     }
 
+    private func handleVersion(_ info: [String: Any]) {
+        guard (info["command"] as? String) == "get_version",
+              let modules = info["module"] as? [[String: Any]] else { return }
+        var found: String?
+        for module in modules {
+            if let product = module["product_name"] as? String, !product.isEmpty {
+                found = product.replacingOccurrences(of: "Bambu Lab ", with: "")
+                break
+            }
+            if let code = module["project_name"] as? String, let model = PrinterModels.fromCode(code) {
+                found = model
+            }
+        }
+        if let found, found != detectedModel {
+            detectedModel = found
+            defaults.set(found, forKey: "printerModel")
+        }
+    }
+
     private func handle(_ data: Data) {
         guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
         if let system = object["system"] as? [String: Any] { handleCommandReply(system) }
+        if let info = object["info"] as? [String: Any] { handleVersion(info) }
         guard let print = object["print"] as? [String: Any] else { return }
         handleCommandReply(print)
         if let command = print["command"] as? String, command != "push_status" { return }
@@ -600,39 +475,16 @@ final class PrinterStore: ObservableObject {
         return result
     }
 
-    // MARK: - Barra dei menu
+    // MARK: - Modello e telecamera
 
-    /// Modello della stampante (es. "P1P"), se noto dal cloud.
+    /// Modello della stampante (es. "P1P"), se riconosciuto.
     var model: String {
-        let id = mode == .cloud ? serial : lanSerial
-        return devices.first(where: { $0.id == id })?.model ?? ""
+        if !detectedModel.isEmpty { return detectedModel }
+        return PrinterModels.fromSerial(serial) ?? ""
     }
 
-    // MARK: - Telecamera
-
-    /// In modalità cloud permette di indicare l'IP locale per la telecamera.
-    func setCameraHost(_ host: String) {
-        lanHost = host.trimmingCharacters(in: .whitespacesAndNewlines)
-        defaults.set(lanHost, forKey: "lanHost")
-        if lanSerial.isEmpty || lanSerial != serial, !serial.isEmpty {
-            lanSerial = serial
-            defaults.set(lanSerial, forKey: "lanSerial")
-        }
-        if let code = devices.first(where: { $0.id == serial })?.accessCode, !code.isEmpty {
-            lanAccessCode = code
-            Keychain.set(code, for: "lanAccessCode")
-        }
-    }
-
-    /// Indirizzo e access code per la telecamera (serve la rete locale).
     var cameraEndpoint: (host: String, accessCode: String)? {
-        guard !lanHost.isEmpty else { return nil }
-        if mode == .lan { return lanAccessCode.isEmpty ? nil : (lanHost, lanAccessCode) }
-        // In cloud: usa l'IP salvato per la rete locale, se riguarda la stessa stampante.
-        guard lanSerial.isEmpty || lanSerial == serial else { return nil }
-        let code = devices.first(where: { $0.id == serial })?.accessCode ?? ""
-        let accessCode = code.isEmpty ? lanAccessCode : code
-        return accessCode.isEmpty ? nil : (lanHost, accessCode)
+        isConfigured ? (host, accessCode) : nil
     }
 
     /// X1 e H2 trasmettono in RTSP; P1 e A1 con il flusso JPEG sulla porta 6000.
@@ -649,29 +501,17 @@ final class PrinterStore: ObservableObject {
         return (status.chamber ?? 0) > 5
     }
 
+    // MARK: - Barra dei menu
+
     var displayName: String {
-        switch mode {
-        case .cloud: return printerName.isEmpty ? "Bambu Lab" : printerName
-        case .lan:
-            if !printerName.isEmpty && lanSerial == serial { return printerName }
-            return "Stampante locale"
-        }
+        if !customName.isEmpty { return customName }
+        if !model.isEmpty { return model }
+        return "Stampante"
     }
 
-    var menuIcon: String {
-        switch state {
-        case .notConfigured: return "cube"
-        case .connecting: return "cube.transparent"
-        case .error: return "exclamationmark.triangle"
-        case .connected:
-            switch status.gcodeState {
-            case "RUNNING", "PREPARE", "SLICING": return "cube.fill"
-            case "PAUSE": return "pause.circle"
-            case "FINISH": return "checkmark.circle"
-            case "FAILED": return "xmark.octagon"
-            default: return "cube"
-            }
-        }
+    /// Ci sono errori o avvisi gravi da segnalare.
+    var hasProblems: Bool {
+        status.printError != 0 || status.hms.contains { $0.severity <= 2 }
     }
 
     var menuTitle: String {
@@ -687,19 +527,6 @@ final class PrinterStore: ObservableObject {
         case "FINISH": return "Finita"
         case "FAILED": return "Errore"
         default: return ""
-        }
-    }
-
-    var stateDescription: String {
-        switch state {
-        case .notConfigured:
-            if mode == .lan { return "Configura la rete locale" }
-            return isLoggedIn ? "Scegli una stampante" : "Accedi con l'account Bambu Lab"
-        case .connecting: return mode == .cloud ? "Connessione al cloud…" : "Connessione a \(lanHost)…"
-        case .error: return "Disconnessa – nuovo tentativo tra poco"
-        case .connected:
-            let suffix = mode == .cloud ? " · cloud" : " · LAN"
-            return (hasData ? status.stateName : "In attesa della stampante") + suffix
         }
     }
 

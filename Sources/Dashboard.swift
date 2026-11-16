@@ -99,14 +99,13 @@ struct HeaderView: View {
         if !store.model.isEmpty && store.model != store.displayName { parts.append(store.model) }
         switch store.state {
         case .connected:
-            parts.append(store.mode == .cloud ? "Cloud" : "LAN")
+            parts.append(store.host)
         case .connecting:
             parts.append("Connessione…")
         case .error:
             parts.append("Disconnessa")
         case .notConfigured:
-            parts.append(store.mode == .lan ? "Configura la rete locale"
-                         : (store.isLoggedIn ? "Scegli una stampante" : "Accedi a Bambu Lab"))
+            parts.append("Configura la stampante")
         }
         return parts
     }

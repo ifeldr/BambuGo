@@ -2,7 +2,7 @@ import Foundation
 import Network
 
 /// Client MQTT 3.1.1 minimale su TLS, sufficiente per parlare con le stampanti Bambu Lab
-/// sia in cloud (us.mqtt.bambulab.com) sia in rete locale.
+/// in rete locale.
 final class MQTTClient {
     var onMessage: ((String, Data) -> Void)?
     /// (connesso, messaggio di errore)

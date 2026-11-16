@@ -182,7 +182,6 @@ struct OverlayButton: View {
 struct CameraCard: View {
     @EnvironmentObject var store: PrinterStore
     @AppStorage("showCamera") private var expanded = true
-    @State private var hostField = ""
 
     var body: some View {
         Card {
@@ -206,15 +205,6 @@ struct CameraCard: View {
                 if let endpoint = store.cameraEndpoint {
                     CameraView(host: endpoint.host, accessCode: endpoint.accessCode, preferRTSP: store.cameraUsesRTSP)
                         .frame(height: 176)
-                } else if store.mode == .cloud {
-                    note("Il video arriva solo in rete locale: indica l'IP della stampante (lo trovi sul display in Impostazioni → Rete).")
-                    HStack {
-                        TextField("192.168.1.50", text: $hostField)
-                            .textFieldStyle(.roundedBorder)
-                        Button("Usa") { store.setCameraHost(hostField) }
-                            .disabled(hostField.trimmingCharacters(in: .whitespaces).isEmpty)
-                    }
-                    .controlSize(.small)
                 } else {
                     note("Configura IP e access code della rete locale per vedere il video.")
                 }

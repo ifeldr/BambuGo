@@ -15,7 +15,7 @@
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.1.0</string>
+    <string>1.2.0</string>
     <key>CFBundleVersion</key>
     <string>1</string>
     <key>LSMinimumSystemVersion</key>
@@ -23,7 +23,7 @@
     <key>LSUIElement</key>
     <true/>
     <key>NSLocalNetworkUsageDescription</key>
-    <string>BambuGo si collega alla stampante Bambu Lab nella rete locale per leggerne lo stato e mostrare la telecamera.</string>
+    <string>BambuGo si collega alla stampante Bambu Lab nella rete locale per trovarla, leggerne lo stato, mostrare la telecamera e inviare i comandi di pausa, ripresa, interruzione e luce.</string>
     <key>NSHumanReadableCopyright</key>
     <string>Lorenzo Garbi. Progetto indipendente, non affiliato a Bambu Lab.</string>
 </dict>
