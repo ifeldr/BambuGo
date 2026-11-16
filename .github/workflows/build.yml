@@ -31,6 +31,12 @@ jobs:
             echo "value=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
           elif [[ -n "${{ inputs.version }}" ]]; then
             echo "value=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+          elif [[ "$GITHUB_EVENT_NAME" == "push" && "$GITHUB_REF" == "refs/heads/main" ]]; then
+            # Nuova versione in Info.plist senza tag corrispondente → release automatica
+            PLIST_VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" Info.plist)
+            if [[ -z "$(git ls-remote --tags origin "refs/tags/v$PLIST_VERSION")" ]]; then
+              echo "value=$PLIST_VERSION" >> "$GITHUB_OUTPUT"
+            fi
           fi
 
       - name: Imposta la versione
