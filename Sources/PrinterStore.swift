@@ -24,6 +24,9 @@ struct PrintStatus {
     var taskName = ""
     var printError = 0
     var speedLevel = 0
+    var wifiSignal: Int?
+    var amsUnits: [AMSUnit] = []
+    var externalSpool: AMSTray?
 
     init() {}
 
@@ -40,6 +43,32 @@ struct PrintStatus {
         chamber = Self.double(dict["chamber_temper"])
         printError = Self.int(dict["print_error"]) ?? 0
         speedLevel = Self.int(dict["spd_lvl"]) ?? 0
+        if let wifi = dict["wifi_signal"] as? String {
+            wifiSignal = Int(wifi.filter { $0.isNumber || $0 == "-" })
+        }
+
+        if let ams = dict["ams"] as? [String: Any] {
+            let trayNow = Self.int(ams["tray_now"]) ?? 255
+            let units = ams["ams"] as? [[String: Any]] ?? []
+            amsUnits = units.enumerated().map { (index, unit) -> AMSUnit in
+                let unitID = Self.int(unit["id"]) ?? index
+                let trays = (unit["tray"] as? [[String: Any]] ?? []).enumerated().map { (slotIndex, tray) -> AMSTray in
+                    let slot = Self.int(tray["id"]) ?? slotIndex
+                    let letter = String(UnicodeScalar(UInt8(65 + min(max(unitID, 0), 25))))
+                    return AMSTray(dict: tray, id: "\(unitID)-\(slot)", label: "\(letter)\(slot + 1)",
+                                   active: unitID * 4 + slot == trayNow)
+                }
+                var humidity = Self.int(unit["humidity_raw"])
+                if humidity == 0 { humidity = nil }
+                return AMSUnit(id: unitID, humidity: humidity, temperature: Self.double(unit["temp"]),
+                               trays: trays)
+            }
+            if let vt = dict["vt_tray"] as? [String: Any] {
+                externalSpool = AMSTray(dict: vt, id: "ext", label: "Est.", active: trayNow == 254)
+            }
+        } else if let vt = dict["vt_tray"] as? [String: Any] {
+            externalSpool = AMSTray(dict: vt, id: "ext", label: "Est.", active: false)
+        }
 
         var name = (dict["subtask_name"] as? String) ?? ""
         if name.isEmpty { name = (dict["gcode_file"] as? String) ?? "" }
@@ -76,15 +105,43 @@ struct PrintStatus {
         }
     }
 
-    private static func double(_ value: Any?) -> Double? {
+    static func double(_ value: Any?) -> Double? {
         if let n = value as? NSNumber { return n.doubleValue }
         if let s = value as? String { return Double(s) }
         return nil
     }
 
-    private static func int(_ value: Any?) -> Int? {
+    static func int(_ value: Any?) -> Int? {
         double(value).map { Int($0) }
     }
+}
+
+struct AMSTray: Identifiable {
+    let id: String
+    let label: String
+    let type: String
+    let colorHex: String
+    let remain: Int?
+    let active: Bool
+
+    var isEmpty: Bool { type.isEmpty }
+
+    init(dict: [String: Any], id: String, label: String, active: Bool) {
+        self.id = id
+        self.label = label
+        self.active = active
+        type = (dict["tray_type"] as? String ?? "").trimmingCharacters(in: .whitespaces)
+        colorHex = dict["tray_color"] as? String ?? ""
+        let value = PrintStatus.int(dict["remain"])
+        remain = (value ?? -1) >= 0 ? value : nil
+    }
+}
+
+struct AMSUnit: Identifiable {
+    let id: Int
+    let humidity: Int?
+    let temperature: Double?
+    let trays: [AMSTray]
 }
 
 enum ConnectionMode: String, CaseIterable, Identifiable {
@@ -406,7 +463,7 @@ final class PrinterStore: ObservableObject {
 
         let previousState = status.gcodeState
         // P1/A1 inviano aggiornamenti parziali: uniamo i campi a quelli già noti.
-        raw.merge(print) { _, new in new }
+        raw = Self.deepMerge(raw, print)
         let newStatus = PrintStatus(dict: raw)
         status = newStatus
         hasData = true
@@ -416,7 +473,32 @@ final class PrinterStore: ObservableObject {
         notifyTransition(from: previousState, to: newStatus)
     }
 
+    private static func deepMerge(_ base: [String: Any], _ update: [String: Any]) -> [String: Any] {
+        var result = base
+        for (key, value) in update {
+            if let old = result[key] as? [String: Any], let new = value as? [String: Any] {
+                result[key] = deepMerge(old, new)
+            } else {
+                result[key] = value
+            }
+        }
+        return result
+    }
+
     // MARK: - Barra dei menu
+
+    /// Modello della stampante (es. "P1P"), se noto dal cloud.
+    var model: String {
+        let id = mode == .cloud ? serial : lanSerial
+        return devices.first(where: { $0.id == id })?.model ?? ""
+    }
+
+    /// P1 e A1 non hanno il sensore in camera: il valore riportato non è reale.
+    var hasChamberSensor: Bool {
+        let m = model.uppercased()
+        if m.hasPrefix("P1") || m.hasPrefix("A1") { return false }
+        return (status.chamber ?? 0) > 5
+    }
 
     var displayName: String {
         switch mode {

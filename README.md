@@ -6,9 +6,10 @@ App per la barra dei menu di macOS che mostra lo stato di una stampante Bambu La
 (X1, P1, A1, H2D…), collegandosi **via cloud Bambu Lab** oppure **direttamente in rete locale**.
 
 Nella barra: icona + `45% · 1h 12m` durante la stampa, `Pausa`, `Finita`, `Errore`;
-solo icona quando è ferma. Cliccando si apre un pannello con nome del lavoro,
-avanzamento, strato, tempo rimanente, ora di fine, temperature di ugello/piatto/camera
-e velocità. Notifiche a fine stampa, errore e pausa (es. filamento finito).
+solo icona quando è ferma. Cliccando si apre un pannello a schede con anello di avanzamento,
+nome del lavoro, strato, tempo rimanente e ora di fine, temperature di ugello/piatto/camera
+con l'obiettivo di riscaldamento, bobine dell'AMS (colore, materiale, residuo, umidità),
+qualità del Wi-Fi e velocità. Notifiche a fine stampa, errore e pausa (es. filamento finito).
 
 In più: **browser di modelli pronti** su MakerWorld, Printables e Thingiverse.
 
