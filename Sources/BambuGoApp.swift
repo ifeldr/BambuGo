@@ -99,23 +99,9 @@ struct ContentView: View {
             Button {
                 BrowserWindowController.shared.show()
             } label: {
-                Label("Modelli", systemImage: "globe")
+                Label("Modelli online", systemImage: "globe")
             }
             .help("Esplora modelli pronti su MakerWorld, Printables e Thingiverse")
-
-            Button {
-                Slicers.chooseAndOpenFile()
-            } label: {
-                Label("Apri file…", systemImage: "doc")
-            }
-            .help("Apri un file STL/3MF nello slicer")
-
-            Button {
-                Slicers.openSlicer()
-            } label: {
-                Label("Slicer", systemImage: "square.stack.3d.up")
-            }
-            .help(Slicers.preferred().map { "Apri \($0.name)" } ?? "Nessuno slicer trovato")
         }
         .controlSize(.small)
         .frame(maxWidth: .infinity)
@@ -283,7 +269,6 @@ struct SettingsView: View {
             if let error = store.loginItemError {
                 Text(error).font(.caption2).foregroundStyle(.red)
             }
-            SlicerPicker()
         }
         .textFieldStyle(.roundedBorder)
         .disabled(store.busy)
@@ -491,28 +476,5 @@ struct AccountView: View {
         let dot = device.online ? "🟢" : "⚪️"
         let model = device.model.isEmpty ? "" : " (" + device.model + ")"
         return dot + " " + device.name + model
-    }
-}
-
-struct SlicerPicker: View {
-    @AppStorage(Slicers.preferenceKey) private var preferred = ""
-    @State private var slicers: [SlicerApp] = []
-
-    var body: some View {
-        HStack {
-            Text("Slicer")
-            Spacer()
-            if slicers.isEmpty {
-                Text("nessuno installato").foregroundStyle(.secondary)
-            } else {
-                Picker("Slicer", selection: $preferred) {
-                    Text("Automatico").tag("")
-                    ForEach(slicers) { Text($0.name).tag($0.id) }
-                }
-                .labelsHidden()
-                .fixedSize()
-            }
-        }
-        .onAppear { slicers = Slicers.installed() }
     }
 }

@@ -193,7 +193,6 @@ struct WebView: NSViewRepresentable {
 
 struct ModelBrowserView: View {
     @StateObject private var browser = WebBrowserModel()
-    @State private var slicerName = Slicers.preferred()?.name
 
     var body: some View {
         VStack(spacing: 0) {
@@ -206,7 +205,6 @@ struct ModelBrowserView: View {
             }
         }
         .frame(minWidth: 900, minHeight: 600)
-        .onAppear { slicerName = Slicers.preferred()?.name }
     }
 
     private var toolbar: some View {
@@ -244,13 +242,6 @@ struct ModelBrowserView: View {
                 Image(systemName: "safari")
             }
             .help("Apri nel browser")
-
-            Button { Slicers.chooseAndOpenFile() } label: {
-                Label("Apri file…", systemImage: "doc")
-            }
-            Button { Slicers.openSlicer() } label: {
-                Label(slicerName ?? "Slicer", systemImage: "square.stack.3d.up")
-            }
         }
         .buttonStyle(.borderless)
         .padding(.horizontal, 12)
@@ -264,11 +255,8 @@ struct ModelBrowserView: View {
             Text(message).lineLimit(1).truncationMode(.middle)
             Spacer()
             if let file = browser.downloadedFile {
-                if Slicers.fileExtensions.contains(file.pathExtension.lowercased()) {
-                    Button("Apri in \(slicerName ?? "slicer")") { Slicers.open([file]) }
-                        .keyboardShortcut(.defaultAction)
-                }
                 Button("Mostra nel Finder") { NSWorkspace.shared.activateFileViewerSelecting([file]) }
+                    .keyboardShortcut(.defaultAction)
             }
             Button {
                 browser.downloadMessage = nil

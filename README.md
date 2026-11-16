@@ -10,9 +10,7 @@ solo icona quando è ferma. Cliccando si apre un pannello con nome del lavoro,
 avanzamento, strato, tempo rimanente, ora di fine, temperature di ugello/piatto/camera
 e velocità. Notifiche a fine stampa, errore e pausa (es. filamento finito).
 
-In più: **browser di modelli pronti** (MakerWorld, Printables, Thingiverse) e
-**collegamento allo slicer** (Bambu Studio, OrcaSlicer, PrusaSlicer o Cura) per aprire
-al volo i file scaricati o i tuoi STL/3MF.
+In più: **browser di modelli pronti** su MakerWorld, Printables e Thingiverse.
 
 ## Requisiti
 
@@ -45,20 +43,11 @@ Clicca l'icona a cubo e scegli la modalità in alto (si cambia quando vuoi dall'
 3. Concedi il permesso **Rete locale** quando macOS lo chiede
    (Impostazioni di Sistema → Privacy e sicurezza → Rete locale).
 
-## Modelli online e slicer
+## Modelli online
 
-Dal pannello:
-
-- **Modelli** apre una finestra con MakerWorld, Printables e Thingiverse
-  (il login ai siti resta salvato). I file scaricati finiscono in *Download* e una barra
-  in basso propone **Apri in Bambu Studio** o **Mostra nel Finder**.
-  Il pulsante "Apri in Bambu Studio" di MakerWorld passa il modello direttamente allo slicer.
-- **Apri file…** sceglie un file 3MF/STL/STEP/OBJ e lo apre nello slicer.
-- **Slicer** apre lo slicer preferito.
-
-Lo slicing vero e proprio lo fa lo slicer installato: BambuGo trova da solo Bambu Studio,
-OrcaSlicer, PrusaSlicer e UltiMaker Cura in *Applicazioni*. Quello preferito si sceglie
-dall'ingranaggio (con "Automatico" usa il primo trovato, nell'ordine indicato).
+Il pulsante **Modelli online** del pannello apre una finestra con MakerWorld, Printables
+e Thingiverse (il login ai siti resta salvato). I file scaricati finiscono in *Download*
+e una barra in basso permette di mostrarli nel Finder.
 
 ## Come funziona
 
@@ -80,8 +69,7 @@ Password dell'account mai salvata; token e access code stanno nel Portachiavi.
   (la firma ad-hoc cambia): scegli "Consenti sempre".
 - Le API cloud non sono ufficiali e Bambu può cambiarle; l'app evita richieste frequenti.
 - In rete locale, P1/A1 accettano poche connessioni MQTT contemporanee.
-- L'app legge solo lo stato della stampante, non invia comandi di stampa:
-  per mandare in stampa si passa dallo slicer.
+- L'app legge solo lo stato della stampante, non invia comandi di stampa.
 
 ## Supporto
 
