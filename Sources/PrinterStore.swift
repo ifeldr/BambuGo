@@ -635,10 +635,11 @@ final class PrinterStore: ObservableObject {
         return accessCode.isEmpty ? nil : (lanHost, accessCode)
     }
 
-    /// X1 e H2 trasmettono in RTSP: non supportato.
-    var cameraSupported: Bool {
+    /// X1 e H2 trasmettono in RTSP; P1 e A1 con il flusso JPEG sulla porta 6000.
+    /// Se il modello non è noto si prova il JPEG e, se non risponde, si passa a RTSP.
+    var cameraUsesRTSP: Bool {
         let m = model.uppercased()
-        return !(m.hasPrefix("X1") || m.hasPrefix("H2"))
+        return m.hasPrefix("X1") || m.hasPrefix("H2")
     }
 
     /// P1 e A1 non hanno il sensore in camera: il valore riportato non è reale.

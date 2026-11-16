@@ -25,6 +25,7 @@ done
 lipo -create "${BINARIES[@]}" -output "$APP/Contents/MacOS/BambuGo"
 rm -f "${BINARIES[@]}"
 cp Info.plist "$APP/Contents/Info.plist"
+cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 
 # Firma ad-hoc (necessaria per notifiche e avvio al login)
 codesign --force --sign - "$APP"

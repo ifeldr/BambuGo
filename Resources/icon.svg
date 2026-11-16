@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1FC39A"/>
+      <stop offset="1" stop-color="#1A6FD6"/>
+    </linearGradient>
+    <linearGradient id="shine" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFFFFF" stop-opacity="0.28"/>
+      <stop offset="0.5" stop-color="#FFFFFF" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="print" x1="0" y1="1" x2="0" y2="0">
+      <stop offset="0" stop-color="#FF7A2F"/>
+      <stop offset="1" stop-color="#FFC43D"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="18" stdDeviation="22" flood-color="#0A2A55" flood-opacity="0.35"/>
+    </filter>
+    <filter id="soft" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="8" stdDeviation="10" flood-color="#08305E" flood-opacity="0.35"/>
+    </filter>
+  </defs>
+
+  <!-- fondo stile macOS -->
+  <g filter="url(#shadow)">
+    <rect x="100" y="100" width="824" height="824" rx="186" fill="url(#bg)"/>
+  </g>
+  <rect x="100" y="100" width="824" height="824" rx="186" fill="url(#shine)"/>
+
+  <g filter="url(#soft)">
+    <!-- telaio della stampante -->
+    <rect x="262" y="250" width="500" height="520" rx="64" fill="none" stroke="#FFFFFF" stroke-width="38"/>
+    <!-- asse X -->
+    <rect x="262" y="372" width="500" height="26" rx="13" fill="#FFFFFF"/>
+    <!-- testina -->
+    <rect x="452" y="346" width="120" height="96" rx="22" fill="#FFFFFF"/>
+    <path d="M488 442 L536 442 L512 476 Z" fill="#FFFFFF"/>
+    <!-- oggetto in stampa a strati -->
+    <rect x="432" y="600" width="160" height="26" rx="8" fill="url(#print)"/>
+    <rect x="420" y="568" width="184" height="26" rx="8" fill="url(#print)" opacity="0.95"/>
+    <rect x="444" y="536" width="136" height="26" rx="8" fill="url(#print)" opacity="0.9"/>
+    <!-- piatto -->
+    <rect x="330" y="640" width="364" height="30" rx="15" fill="#FFFFFF"/>
+  </g>
+
+  <!-- "go": scie di velocità -->
+  <g stroke="#FFFFFF" stroke-linecap="round" opacity="0.85">
+    <line x1="180" y1="520" x2="228" y2="520" stroke-width="20"/>
+    <line x1="160" y1="574" x2="228" y2="574" stroke-width="20"/>
+    <line x1="192" y1="628" x2="228" y2="628" stroke-width="20"/>
+  </g>
+</svg>

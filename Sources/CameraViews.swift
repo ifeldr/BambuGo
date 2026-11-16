@@ -10,32 +10,63 @@ final class CameraFeed: ObservableObject {
     @Published private(set) var error: String?
     @Published private(set) var lastFrame: Date?
 
-    private var client: CameraClient?
+    private var client: CameraStream?
     private var key = ""
     private var viewers = 0
+    private var host = ""
+    private var accessCode = ""
+    private var useRTSP = false
+    private var gotFrame = false
 
-    func attach(host: String, accessCode: String) {
+    func attach(host: String, accessCode: String, preferRTSP: Bool) {
         viewers += 1
         let newKey = host + "|" + accessCode
-        if client == nil || newKey != key {
-            client?.stop()
-            if newKey != key { image = nil }
-            key = newKey
-            error = nil
-            let camera = CameraClient(host: host, accessCode: accessCode)
-            camera.onFrame = { [weak self] frame in
-                Task { @MainActor in
-                    self?.image = frame
-                    self?.lastFrame = Date()
-                    self?.error = nil
+        guard client == nil || newKey != key else { return }
+        if newKey != key {
+            image = nil
+            gotFrame = false
+            useRTSP = preferRTSP
+        }
+        key = newKey
+        self.host = host
+        self.accessCode = accessCode
+        startClient()
+    }
+
+    private func startClient() {
+        client?.stop()
+        error = nil
+        let camera: CameraStream
+        if useRTSP {
+            camera = RTSPCameraClient(host: host, accessCode: accessCode)
+        } else {
+            camera = CameraClient(host: host, accessCode: accessCode)
+        }
+        camera.onFrame = { [weak self, weak camera] frame in
+            Task { @MainActor in
+                guard let self, let camera, self.client === camera else { return }
+                self.image = frame
+                self.lastFrame = Date()
+                self.error = nil
+                self.gotFrame = true
+            }
+        }
+        camera.onError = { [weak self, weak camera] message in
+            Task { @MainActor in
+                guard let self, let camera, self.client === camera else { return }
+                self.error = message
+                // Mai visto un'immagine: forse il modello usa l'altro protocollo.
+                if !self.gotFrame && self.viewers > 0 {
+                    camera.stop()
+                    self.useRTSP.toggle()
+                    try? await Task.sleep(nanoseconds: 3_000_000_000)
+                    guard self.client === camera, self.viewers > 0 else { return }
+                    self.startClient()
                 }
             }
-            camera.onError = { [weak self] message in
-                Task { @MainActor in self?.error = message }
-            }
-            client = camera
-            camera.start()
         }
+        client = camera
+        camera.start()
     }
 
     func detach() {
@@ -58,11 +89,13 @@ struct CameraView: View {
     @ObservedObject private var feed: CameraFeed
     let host: String
     let accessCode: String
+    let preferRTSP: Bool
     let showsWindowButton: Bool
 
-    init(host: String, accessCode: String, showsWindowButton: Bool = true) {
+    init(host: String, accessCode: String, preferRTSP: Bool, showsWindowButton: Bool = true) {
         self.host = host
         self.accessCode = accessCode
+        self.preferRTSP = preferRTSP
         self.showsWindowButton = showsWindowButton
         _feed = ObservedObject(wrappedValue: CameraFeed.shared)
     }
@@ -111,7 +144,7 @@ struct CameraView: View {
                     if showsWindowButton {
                         OverlayButton(systemName: "arrow.up.left.and.arrow.down.right",
                                       help: "Apri in una finestra", tint: .white) {
-                            CameraWindowController.shared.show(store: store, host: host, accessCode: accessCode)
+                            CameraWindowController.shared.show(store: store, host: host, accessCode: accessCode, preferRTSP: preferRTSP)
                         }
                     }
                 }
@@ -120,7 +153,7 @@ struct CameraView: View {
             .padding(7)
         }
         .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .onAppear { feed.attach(host: host, accessCode: accessCode) }
+        .onAppear { feed.attach(host: host, accessCode: accessCode, preferRTSP: preferRTSP) }
         .onDisappear { feed.detach() }
     }
 }
@@ -170,10 +203,8 @@ struct CameraCard: View {
             .buttonStyle(.plain)
 
             if expanded {
-                if !store.cameraSupported {
-                    note("La telecamera di questo modello usa un flusso RTSP non ancora supportato.")
-                } else if let endpoint = store.cameraEndpoint {
-                    CameraView(host: endpoint.host, accessCode: endpoint.accessCode)
+                if let endpoint = store.cameraEndpoint {
+                    CameraView(host: endpoint.host, accessCode: endpoint.accessCode, preferRTSP: store.cameraUsesRTSP)
                         .frame(height: 176)
                 } else if store.mode == .cloud {
                     note("Il video arriva solo in rete locale: indica l'IP della stampante (lo trovi sul display in Impostazioni → Rete).")
@@ -206,13 +237,13 @@ final class CameraWindowController {
     private var window: NSPanel?
 
     @MainActor
-    func show(store: PrinterStore, host: String, accessCode: String) {
+    func show(store: PrinterStore, host: String, accessCode: String, preferRTSP: Bool) {
         if let window {
             window.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
             return
         }
-        let content = CameraView(host: host, accessCode: accessCode, showsWindowButton: false)
+        let content = CameraView(host: host, accessCode: accessCode, preferRTSP: preferRTSP, showsWindowButton: false)
             .environmentObject(store)
             .padding(6)
             .frame(minWidth: 320, minHeight: 180)
