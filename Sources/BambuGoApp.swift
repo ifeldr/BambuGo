@@ -392,16 +392,27 @@ struct CodeView: View {
             Text(isTFA ? "Verifica in due passaggi" : "Codice di verifica")
                 .font(.subheadline.weight(.semibold))
             Text(isTFA ? "Inserisci il codice della tua app di autenticazione."
-                       : "Bambu Lab ha inviato un codice a 6 cifre a \(store.email).")
+                       : "Bambu Lab ha inviato un codice a 6 cifre a \(store.email). Vale pochi minuti: usa quello dell'ultima email ricevuta.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             TextField("123456", text: $code)
+                .onChange(of: code) { newValue in
+                    let digits = String(newValue.filter(\.isNumber).prefix(6))
+                    if digits != newValue { code = digits }
+                }
 
             HStack {
                 Button("Indietro") { store.cancelLogin() }
                 if !isTFA {
-                    Button("Invia di nuovo") { Task { await store.resendCode() } }
+                    TimelineView(.periodic(from: .now, by: 1)) { context in
+                        let wait = max(0, 60 - Int(context.date.timeIntervalSince(store.lastCodeSent ?? .distantPast)))
+                        Button(wait > 0 ? "Invia di nuovo (\(wait)s)" : "Invia di nuovo") {
+                            code = ""
+                            Task { await store.resendCode() }
+                        }
+                        .disabled(wait > 0)
+                    }
                 }
                 Spacer()
                 if store.busy { ProgressView().controlSize(.small) }
@@ -410,7 +421,7 @@ struct CodeView: View {
                     Task { await store.submitCode(value) }
                 }
                 .keyboardShortcut(.defaultAction)
-                .disabled(code.trimmingCharacters(in: .whitespaces).count < 4)
+                .disabled(code.count < 6)
             }
         }
     }

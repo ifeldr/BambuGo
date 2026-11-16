@@ -63,7 +63,8 @@ struct BambuCloud {
     func login(email: String, code: String) async throws -> String {
         let json = try await post("/v1/user-service/user/login", body: ["account": email, "code": code])
         guard let token = json["accessToken"] as? String, !token.isEmpty else {
-            throw CloudError(message: Self.message(from: json) ?? "Codice non valido o scaduto")
+            let detail = Self.message(from: json) ?? "loginType: \(json["loginType"] as? String ?? "-")"
+            throw CloudError(message: "Codice non accettato da Bambu Lab (\(detail))")
         }
         return token
     }
@@ -87,13 +88,38 @@ struct BambuCloud {
 
     // MARK: - Dati account
 
-    /// Username MQTT: "u_" + id utente.
+    /// Username MQTT: "u_" + id utente. Il token oggi è opaco (non JWT): l'id si legge
+    /// dal profilo, con un paio di endpoint di riserva.
     func mqttUsername(token: String) async throws -> String {
         if let fromJWT = Self.usernameFromJWT(token) { return fromJWT }
-        let json = try await get("/v1/design-user-service/my/preference", token: token)
-        if let uid = json["uid"] as? NSNumber { return "u_\(uid.int64Value)" }
-        if let uid = json["uid"] as? String, !uid.isEmpty { return "u_\(uid)" }
-        throw CloudError(message: "Impossibile leggere l'ID utente dal cloud")
+
+        let endpoints = [
+            region.apiBase + "/v1/user-service/my/profile",
+            region.apiBase + "/v1/design-user-service/my/preference",
+            (region == .global ? "https://makerworld.com" : "https://makerworld.com.cn")
+                + "/api/v1/design-user-service/my/preference",
+        ]
+        var lastError: Error?
+        for endpoint in endpoints {
+            guard let url = URL(string: endpoint) else { continue }
+            do {
+                let (json, _) = try await send(url: url, method: "GET", body: nil, token: token)
+                if let uid = Self.uid(from: json) { return "u_\(uid)" }
+            } catch {
+                lastError = error
+            }
+        }
+        let detail = lastError?.localizedDescription ?? "risposta senza uid"
+        throw CloudError(message: "Accesso riuscito, ma non riesco a leggere l'ID utente: \(detail)")
+    }
+
+    private static func uid(from json: [String: Any]) -> String? {
+        for key in ["uid", "uidStr", "userId"] {
+            if let n = json[key] as? NSNumber { return String(n.int64Value) }
+            if let s = json[key] as? String, !s.isEmpty { return s }
+        }
+        if let user = json["user"] as? [String: Any] { return uid(from: user) }
+        return nil
     }
 
     func devices(token: String) async throws -> [CloudDevice] {
@@ -146,16 +172,17 @@ struct BambuCloud {
         }
         guard let http = response as? HTTPURLResponse else { throw CloudError(message: "Risposta non valida") }
         let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
+        guard !(200..<300).contains(http.statusCode) else { return (json, http) }
 
-        switch http.statusCode {
-        case 200..<300:
-            return (json, http)
-        case 401, 403:
-            throw CloudError(message: Self.message(from: json) ?? "Sessione scaduta o credenziali errate",
-                             isUnauthorized: token != nil)
-        default:
-            throw CloudError(message: Self.message(from: json) ?? "Errore dal cloud (HTTP \(http.statusCode))")
-        }
+        // Messaggio dettagliato: cosa ha risposto il server, con quale codice e su quale endpoint.
+        let serverText = Self.message(from: json)
+            ?? String(data: data.prefix(160), encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        let isHTML = serverText?.hasPrefix("<") ?? false
+        let reason = (serverText?.isEmpty == false && !isHTML) ? serverText! : "nessun dettaglio"
+        let place = "HTTP \(http.statusCode) su \(url.host ?? "")\(url.path)"
+        throw CloudError(message: "\(reason) (\(place))",
+                         isUnauthorized: token != nil && http.statusCode == 401)
     }
 
     private static func message(from json: [String: Any]) -> String? {

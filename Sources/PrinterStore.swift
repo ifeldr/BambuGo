@@ -211,6 +211,7 @@ final class PrinterStore: ObservableObject {
             case .success(let token):
                 try await finishLogin(token: token)
             case .needsEmailCode:
+                lastCodeSent = Date()
                 loginStep = .emailCode
             case .needsTFA(let key):
                 loginStep = .tfa(key)
@@ -221,7 +222,7 @@ final class PrinterStore: ObservableObject {
     }
 
     func submitCode(_ code: String) async {
-        let code = code.trimmingCharacters(in: .whitespacesAndNewlines)
+        let code = String(code.filter(\.isNumber))
         busy = true
         loginError = nil
         defer { busy = false }
@@ -238,12 +239,15 @@ final class PrinterStore: ObservableObject {
         }
     }
 
+    @Published private(set) var lastCodeSent: Date?
+
     func resendCode() async {
         busy = true
         defer { busy = false }
         do {
             try await cloud.sendEmailCode(email: email)
-            loginError = "Nuovo codice inviato a \(email)"
+            lastCodeSent = Date()
+            loginError = "Nuovo codice inviato a \(email). Usa solo l'ultimo: i precedenti non valgono più."
         } catch {
             loginError = error.localizedDescription
         }
