@@ -6,6 +6,11 @@ on:
     tags: ["v*"]
   pull_request:
   workflow_dispatch:
+    inputs:
+      version:
+        description: "Versione da pubblicare come release (es. 1.0.0). Vuoto = solo build"
+        required: false
+        default: ""
 
 permissions:
   contents: write
@@ -19,10 +24,19 @@ jobs:
       - name: Versione Swift
         run: swift --version
 
-      - name: Imposta la versione dal tag
-        if: startsWith(github.ref, 'refs/tags/v')
+      - name: Determina la versione
+        id: version
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            echo "value=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          elif [[ -n "${{ inputs.version }}" ]]; then
+            echo "value=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Imposta la versione
+        if: steps.version.outputs.value != ''
+        run: |
+          VERSION="${{ steps.version.outputs.value }}"
           /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" Info.plist
           /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${{ github.run_number }}" Info.plist
 
@@ -44,8 +58,11 @@ jobs:
           path: build/BambuGo.zip
 
       - name: Pubblica la release
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: steps.version.outputs.value != ''
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: v${{ steps.version.outputs.value }}
+          name: BambuGo ${{ steps.version.outputs.value }}
+          target_commitish: ${{ github.sha }}
           files: build/BambuGo.zip
           generate_release_notes: true

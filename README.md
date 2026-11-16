@@ -28,8 +28,9 @@ e premi **Apri comunque**, oppure da Terminale:
 xattr -dr com.apple.quarantine /Applications/BambuGo.app
 ```
 
-Ogni push su `main` compila l'app con GitHub Actions; per pubblicare una nuova release
-basta creare un tag `vX.Y.Z` (es. `git tag v1.1.0 && git push --tags`).
+Ogni push su `main` compila l'app con GitHub Actions (lo zip è tra gli *artifacts* della
+run). Per pubblicare una release: *Actions → Build → Run workflow*, inserisci la versione
+(es. `1.1.0`) e avvia; in alternativa crea e pubblica un tag `vX.Y.Z`.
 
 ## Compilazione e installazione
 
