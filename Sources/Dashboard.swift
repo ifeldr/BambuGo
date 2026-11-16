@@ -11,6 +11,7 @@ enum Palette {
 }
 
 /// Colore di stato usato da badge, anello e pillola.
+@MainActor
 func stateColor(_ store: PrinterStore) -> Color {
     switch store.state {
     case .error: return .orange
