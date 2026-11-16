@@ -27,6 +27,8 @@ struct PrintStatus {
     var wifiSignal: Int?
     var amsUnits: [AMSUnit] = []
     var externalSpool: AMSTray?
+    var hms: [HMSAlert] = []
+    var lightOn: Bool?
 
     init() {}
 
@@ -68,6 +70,15 @@ struct PrintStatus {
             }
         } else if let vt = dict["vt_tray"] as? [String: Any] {
             externalSpool = AMSTray(dict: vt, id: "ext", label: "Est.", active: false)
+        }
+
+        hms = (dict["hms"] as? [[String: Any]] ?? []).compactMap { item in
+            guard let attr = Self.int(item["attr"]), let code = Self.int(item["code"]) else { return nil }
+            return HMSAlert(attr: attr, code: code)
+        }
+        if let lights = dict["lights_report"] as? [[String: Any]],
+           let chamber = lights.first(where: { ($0["node"] as? String) == "chamber_light" }) {
+            lightOn = (chamber["mode"] as? String) == "on"
         }
 
         var name = (dict["subtask_name"] as? String) ?? ""
@@ -134,6 +145,58 @@ struct AMSTray: Identifiable {
         colorHex = dict["tray_color"] as? String ?? ""
         let value = PrintStatus.int(dict["remain"])
         remain = (value ?? -1) >= 0 ? value : nil
+    }
+}
+
+/// Messaggio HMS (Health Management System) della stampante.
+struct HMSAlert: Identifiable, Hashable {
+    let attr: Int
+    let code: Int
+
+    var id: String { fullCode }
+
+    var fullCode: String {
+        String(format: "%04X_%04X_%04X_%04X", (attr >> 16) & 0xFFFF, attr & 0xFFFF, (code >> 16) & 0xFFFF, code & 0xFFFF)
+    }
+
+    /// Modulo da cui arriva l'avviso.
+    var module: String {
+        switch (attr >> 24) & 0xFF {
+        case 0x03: return "Movimento"
+        case 0x05: return "Scheda madre"
+        case 0x07: return "AMS"
+        case 0x08: return "Testina"
+        case 0x0C: return "Telecamera / AI"
+        case 0x12: return "AMS lite"
+        default: return "Stampante"
+        }
+    }
+
+    var isAMS: Bool { [0x07, 0x12].contains((attr >> 24) & 0xFF) }
+
+    /// AMS e slot coinvolti, se l'avviso riguarda una bobina.
+    var amsDetail: String? {
+        guard isAMS else { return nil }
+        let unit = (attr >> 16) & 0xFF
+        let slot = (attr >> 8) & 0xFF
+        let letter = String(UnicodeScalar(UInt8(65 + min(unit, 25))))
+        return slot < 4 ? "AMS \(letter), slot \(slot + 1)" : "AMS \(letter)"
+    }
+
+    /// 1 = fatale, 2 = grave, 3 = normale, 4 = informazione
+    var severity: Int { (code >> 16) & 0xFFFF }
+
+    var severityName: String {
+        switch severity {
+        case 1: return "Fatale"
+        case 2: return "Grave"
+        case 3: return "Avviso"
+        default: return "Info"
+        }
+    }
+
+    var wikiURL: URL? {
+        URL(string: "https://wiki.bambulab.com/en/x1/troubleshooting/hmscode/\(fullCode)")
     }
 }
 
@@ -457,9 +520,61 @@ final class PrinterStore: ObservableObject {
         client?.publish(topic: "device/\(activeSerial)/request", payload: Data(payload.utf8))
     }
 
+    // MARK: - Comandi
+
+    @Published var commandMessage: String?
+    @Published private(set) var pendingCommand: String?
+
+    func pause() { sendPrintCommand("pause") }
+    func resume() { sendPrintCommand("resume") }
+    func stop() { sendPrintCommand("stop") }
+
+    func setLight(_ on: Bool) {
+        let mode = on ? "on" : "off"
+        let json = #"{"system":{"sequence_id":"0","command":"ledctrl","led_node":"chamber_light","led_mode":""# + mode
+            + #"","led_on_time":500,"led_off_time":500,"loop_times":0,"interval_time":0}}"#
+        guard state == .connected else { return }
+        client?.publish(topic: "device/\(activeSerial)/request", payload: Data(json.utf8))
+        status.lightOn = on   // aggiornamento ottimistico
+        raw["lights_report"] = [["node": "chamber_light", "mode": mode]]
+    }
+
+    private func sendPrintCommand(_ command: String) {
+        guard state == .connected else { return }
+        let json = #"{"print":{"sequence_id":"0","command":""# + command + #"","param":""}}"#
+        client?.publish(topic: "device/\(activeSerial)/request", payload: Data(json.utf8))
+        commandMessage = nil
+        pendingCommand = command
+        let sent = command
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 10_000_000_000)
+            if self.pendingCommand == sent {
+                self.pendingCommand = nil
+                self.commandMessage = "La stampante non ha risposto al comando. Con il firmware recente il controllo da app di terze parti può richiedere la modalità LAN + sviluppatore."
+            }
+            self.refresh()
+        }
+    }
+
+    private func handleCommandReply(_ dict: [String: Any]) {
+        guard let command = dict["command"] as? String,
+              ["pause", "resume", "stop", "ledctrl"].contains(command),
+              let result = dict["result"] as? String else { return }
+        if command == pendingCommand { pendingCommand = nil }
+        if result.lowercased() != "success" {
+            let reason = (dict["reason"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? result
+            commandMessage = "Comando rifiutato dalla stampante: \(reason)"
+        } else {
+            commandMessage = nil
+        }
+    }
+
     private func handle(_ data: Data) {
-        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let print = object["print"] as? [String: Any] else { return }
+        guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
+        if let system = object["system"] as? [String: Any] { handleCommandReply(system) }
+        guard let print = object["print"] as? [String: Any] else { return }
+        handleCommandReply(print)
+        if let command = print["command"] as? String, command != "push_status" { return }
 
         let previousState = status.gcodeState
         // P1/A1 inviano aggiornamenti parziali: uniamo i campi a quelli già noti.
@@ -491,6 +606,39 @@ final class PrinterStore: ObservableObject {
     var model: String {
         let id = mode == .cloud ? serial : lanSerial
         return devices.first(where: { $0.id == id })?.model ?? ""
+    }
+
+    // MARK: - Telecamera
+
+    /// In modalità cloud permette di indicare l'IP locale per la telecamera.
+    func setCameraHost(_ host: String) {
+        lanHost = host.trimmingCharacters(in: .whitespacesAndNewlines)
+        defaults.set(lanHost, forKey: "lanHost")
+        if lanSerial.isEmpty || lanSerial != serial, !serial.isEmpty {
+            lanSerial = serial
+            defaults.set(lanSerial, forKey: "lanSerial")
+        }
+        if let code = devices.first(where: { $0.id == serial })?.accessCode, !code.isEmpty {
+            lanAccessCode = code
+            Keychain.set(code, for: "lanAccessCode")
+        }
+    }
+
+    /// Indirizzo e access code per la telecamera (serve la rete locale).
+    var cameraEndpoint: (host: String, accessCode: String)? {
+        guard !lanHost.isEmpty else { return nil }
+        if mode == .lan { return lanAccessCode.isEmpty ? nil : (lanHost, lanAccessCode) }
+        // In cloud: usa l'IP salvato per la rete locale, se riguarda la stessa stampante.
+        guard lanSerial.isEmpty || lanSerial == serial else { return nil }
+        let code = devices.first(where: { $0.id == serial })?.accessCode ?? ""
+        let accessCode = code.isEmpty ? lanAccessCode : code
+        return accessCode.isEmpty ? nil : (lanHost, accessCode)
+    }
+
+    /// X1 e H2 trasmettono in RTSP: non supportato.
+    var cameraSupported: Bool {
+        let m = model.uppercased()
+        return !(m.hasPrefix("X1") || m.hasPrefix("H2"))
     }
 
     /// P1 e A1 non hanno il sensore in camera: il valore riportato non è reale.

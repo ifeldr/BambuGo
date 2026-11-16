@@ -9,14 +9,18 @@ Nella barra: icona + `45% · 1h 12m` durante la stampa, `Pausa`, `Finita`, `Erro
 solo icona quando è ferma. Cliccando si apre un pannello a schede con anello di avanzamento,
 nome del lavoro, strato, tempo rimanente e ora di fine, temperature di ugello/piatto/camera
 con l'obiettivo di riscaldamento, bobine dell'AMS (colore, materiale, residuo, umidità),
-qualità del Wi-Fi e velocità. Notifiche a fine stampa, errore e pausa (es. filamento finito).
+qualità del Wi-Fi e velocità; pulsanti **Pausa / Riprendi / Interrompi**; **telecamera**
+in diretta (P1 e A1, in rete locale; apribile in una finestra sempre in primo piano) con
+interruttore della luce; sezione **errori e avvisi** (codici HMS di stampante e AMS, con link
+alla spiegazione sul wiki Bambu Lab). Notifiche a fine stampa, errore e pausa (es. filamento finito).
 
 In più: **browser di modelli pronti** su MakerWorld, Printables e Thingiverse.
 
 > BambuGo è un progetto indipendente e non è affiliato, approvato o sponsorizzato da Bambu Lab.
 > "Bambu Lab" e i nomi delle stampanti sono marchi dei rispettivi proprietari.
-> L'app usa interfacce non ufficiali e si limita a leggere lo stato della stampante:
-> non invia comandi di stampa o di controllo.
+> L'app usa interfacce non ufficiali. Gli unici comandi che invia sono pausa, ripresa,
+> interruzione (con conferma) e luce della camera: con i firmware più recenti la stampante
+> potrebbe rifiutarli se non è in modalità LAN + sviluppatore.
 
 ## Requisiti
 

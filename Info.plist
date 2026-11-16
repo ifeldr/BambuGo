@@ -21,7 +21,7 @@
     <key>LSUIElement</key>
     <true/>
     <key>NSLocalNetworkUsageDescription</key>
-    <string>BambuGo si collega alla stampante Bambu Lab nella rete locale per leggerne lo stato.</string>
+    <string>BambuGo si collega alla stampante Bambu Lab nella rete locale per leggerne lo stato e mostrare la telecamera.</string>
     <key>NSHumanReadableCopyright</key>
     <string>Lorenzo Garbi. Progetto indipendente, non affiliato a Bambu Lab.</string>
 </dict>

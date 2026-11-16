@@ -192,11 +192,9 @@ struct DashboardView: View {
             if case .error(let message) = store.state {
                 Banner(text: message, systemImage: "exclamationmark.triangle.fill", color: .orange)
             }
-            if store.status.printError != 0 {
-                Banner(text: "Errore stampante \(String(store.status.printError, radix: 16, uppercase: true))",
-                       systemImage: "exclamationmark.octagon.fill", color: .red)
+            if let message = store.commandMessage {
+                Banner(text: message, systemImage: "hand.raised.fill", color: .orange)
             }
-
             if !store.hasData {
                 Card {
                     HStack(spacing: 10) {
@@ -209,7 +207,11 @@ struct DashboardView: View {
                     .padding(.vertical, 6)
                 }
             } else {
+                if store.status.printError != 0 || !store.status.hms.isEmpty {
+                    ErrorsCard()
+                }
                 JobCard()
+                CameraCard()
                 TemperatureRow()
                 if !store.status.amsUnits.isEmpty || store.status.externalSpool.map({ !$0.isEmpty }) == true {
                     FilamentCard()
@@ -256,8 +258,9 @@ struct JobCard: View {
                     }
                     Spacer(minLength: 0)
                 }
+                Divider().padding(.vertical, 2)
+                PrintControls()
                 if let speed = s.speedName {
-                    Divider().padding(.vertical, 2)
                     HStack {
                         Label("Velocità", systemImage: "gauge.medium")
                             .foregroundStyle(.secondary)
@@ -356,6 +359,191 @@ struct StatePill: View {
         .padding(.horizontal, 7)
         .padding(.vertical, 3)
         .background(Capsule().fill(color.opacity(0.14)))
+    }
+}
+
+// MARK: - Controlli di stampa
+
+struct PrintControls: View {
+    @EnvironmentObject var store: PrinterStore
+    @State private var confirmStop = false
+
+    var body: some View {
+        let paused = store.status.gcodeState == "PAUSE"
+        let busy = store.pendingCommand != nil
+        HStack(spacing: 8) {
+            if confirmStop {
+                Text("Interrompere la stampa?")
+                    .font(.system(size: 11, weight: .medium))
+                Spacer()
+                ControlButton(title: "No", systemImage: "arrow.uturn.backward", color: .gray) {
+                    confirmStop = false
+                }
+                ControlButton(title: "Interrompi", systemImage: "stop.fill", color: .red, filled: true) {
+                    confirmStop = false
+                    store.stop()
+                }
+            } else {
+                ControlButton(title: paused ? "Riprendi" : "Pausa",
+                              systemImage: paused ? "play.fill" : "pause.fill",
+                              color: paused ? .green : .yellow) {
+                    paused ? store.resume() : store.pause()
+                }
+                ControlButton(title: "Interrompi", systemImage: "stop.fill", color: .red) {
+                    withAnimation(.easeInOut(duration: 0.15)) { confirmStop = true }
+                }
+                Spacer()
+                if busy {
+                    ProgressView().controlSize(.small)
+                    Text("Invio…").font(.system(size: 10)).foregroundStyle(.secondary)
+                }
+            }
+        }
+        .disabled(busy || store.state != .connected)
+    }
+}
+
+struct ControlButton: View {
+    let title: String
+    let systemImage: String
+    let color: Color
+    var filled = false
+    let action: () -> Void
+    @State private var hovering = false
+
+    init(title: String, systemImage: String, color: Color, filled: Bool = false, action: @escaping () -> Void) {
+        self.title = title
+        self.systemImage = systemImage
+        self.color = color
+        self.filled = filled
+        self.action = action
+    }
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 5) {
+                Image(systemName: systemImage).font(.system(size: 9, weight: .bold))
+                Text(title).font(.system(size: 11, weight: .semibold))
+            }
+            .foregroundStyle(filled ? Color.white : color)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(Capsule().fill(filled ? color : color.opacity(hovering ? 0.25 : 0.15)))
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
+    }
+}
+
+// MARK: - Errori
+
+struct ErrorsCard: View {
+    @EnvironmentObject var store: PrinterStore
+
+    var body: some View {
+        let s = store.status
+        let printerAlerts = s.hms.filter { !$0.isAMS }
+        let amsAlerts = s.hms.filter { $0.isAMS }
+        Card {
+            HStack {
+                Label("Errori e avvisi", systemImage: "exclamationmark.triangle.fill")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.red)
+                Spacer()
+                Text("\(s.hms.count + (s.printError != 0 ? 1 : 0))")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 6).padding(.vertical, 1)
+                    .background(Capsule().fill(Color.red))
+            }
+
+            if s.printError != 0 {
+                ErrorRow(title: printErrorTitle(s.printError),
+                         detail: "Codice \(printErrorCode(s.printError))",
+                         severity: "Stampa", color: .red,
+                         url: URL(string: "https://wiki.bambulab.com/en/x1/troubleshooting/hmscode/\(printErrorCode(s.printError))"))
+            }
+
+            if !printerAlerts.isEmpty {
+                section("Stampante")
+                ForEach(printerAlerts) { alert in
+                    ErrorRow(title: alert.module, detail: alert.fullCode, severity: alert.severityName,
+                             color: color(alert.severity), url: alert.wikiURL)
+                }
+            }
+
+            if !amsAlerts.isEmpty {
+                section("AMS")
+                ForEach(amsAlerts) { alert in
+                    ErrorRow(title: alert.amsDetail ?? alert.module, detail: alert.fullCode, severity: alert.severityName,
+                             color: color(alert.severity), url: alert.wikiURL)
+                }
+            }
+        }
+    }
+
+    private func section(_ title: String) -> some View {
+        Text(title.uppercased())
+            .font(.system(size: 9, weight: .bold))
+            .foregroundStyle(.secondary)
+            .padding(.top, 2)
+    }
+
+    private func color(_ severity: Int) -> Color {
+        switch severity {
+        case 1, 2: return .red
+        case 3: return .orange
+        default: return .blue
+        }
+    }
+
+    private func printErrorCode(_ code: Int) -> String {
+        String(format: "%04X_%04X", (code >> 16) & 0xFFFF, code & 0xFFFF)
+    }
+
+    /// Descrizioni dei codici più comuni.
+    private func printErrorTitle(_ code: Int) -> String {
+        switch code {
+        case 0x0300_400C: return "Stampa annullata"
+        case 0x0700_8011, 0x0701_8011, 0x0702_8011, 0x0703_8011, 0x07FF_8011: return "Filamento esaurito"
+        default:
+            return (code >> 24) & 0xFF == 0x07 ? "Problema dell'AMS" : "Errore di stampa"
+        }
+    }
+}
+
+struct ErrorRow: View {
+    let title: String
+    let detail: String
+    let severity: String
+    let color: Color
+    let url: URL?
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 8) {
+            RoundedRectangle(cornerRadius: 2).fill(color).frame(width: 3, height: 26)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title).font(.system(size: 11, weight: .medium)).lineLimit(1)
+                Text(detail)
+                    .font(.system(size: 9, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+            }
+            Spacer(minLength: 4)
+            Text(severity)
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(color)
+            if let url {
+                Button {
+                    NSWorkspace.shared.open(url)
+                } label: {
+                    Image(systemName: "questionmark.circle")
+                }
+                .buttonStyle(.borderless)
+                .help("Apri la spiegazione sul wiki Bambu Lab")
+            }
+        }
     }
 }
 
