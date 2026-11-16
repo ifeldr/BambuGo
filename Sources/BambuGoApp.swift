@@ -269,6 +269,11 @@ struct SettingsView: View {
             if let error = store.loginItemError {
                 Text(error).font(.caption2).foregroundStyle(.red)
             }
+
+            Text("BambuGo è un progetto indipendente, non affiliato a Bambu Lab.")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .textFieldStyle(.roundedBorder)
         .disabled(store.busy)

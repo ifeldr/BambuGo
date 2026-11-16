@@ -139,6 +139,8 @@ struct BambuCloud {
 
     // MARK: - HTTP
 
+    static let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
+
     private func get(_ path: String, token: String) async throws -> [String: Any] {
         guard let url = URL(string: region.apiBase + path) else { throw CloudError(message: "URL non valido") }
         return try await send(url: url, method: "GET", body: nil, token: token).0
@@ -155,10 +157,8 @@ struct BambuCloud {
         request.httpMethod = method
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
-        request.setValue("bambu_network_agent/01.09.05.01", forHTTPHeaderField: "User-Agent")
-        request.setValue("OrcaSlicer", forHTTPHeaderField: "X-BBL-Client-Name")
-        request.setValue("slicer", forHTTPHeaderField: "X-BBL-Client-Type")
-        request.setValue("01.09.05.51", forHTTPHeaderField: "X-BBL-Client-Version")
+        // BambuGo si presenta con il proprio nome: non si spaccia per Bambu Studio o OrcaSlicer.
+        request.setValue("BambuGo/\(Self.appVersion)", forHTTPHeaderField: "User-Agent")
         request.setValue("it-IT", forHTTPHeaderField: "X-BBL-Language")
         if let token { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
         if let body { request.httpBody = try JSONSerialization.data(withJSONObject: body) }

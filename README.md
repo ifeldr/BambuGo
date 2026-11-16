@@ -12,6 +12,11 @@ e velocità. Notifiche a fine stampa, errore e pausa (es. filamento finito).
 
 In più: **browser di modelli pronti** su MakerWorld, Printables e Thingiverse.
 
+> BambuGo è un progetto indipendente e non è affiliato, approvato o sponsorizzato da Bambu Lab.
+> "Bambu Lab" e i nomi delle stampanti sono marchi dei rispettivi proprietari.
+> L'app usa interfacce non ufficiali e si limita a leggere lo stato della stampante:
+> non invia comandi di stampa o di controllo.
+
 ## Requisiti
 
 - macOS 13 Ventura o successivo

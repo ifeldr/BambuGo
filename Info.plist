@@ -23,6 +23,6 @@
     <key>NSLocalNetworkUsageDescription</key>
     <string>BambuGo si collega alla stampante Bambu Lab nella rete locale per leggerne lo stato.</string>
     <key>NSHumanReadableCopyright</key>
-    <string>Lorenzo Garbi</string>
+    <string>Lorenzo Garbi. Progetto indipendente, non affiliato a Bambu Lab.</string>
 </dict>
 </plist>
