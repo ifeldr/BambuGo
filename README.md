@@ -17,6 +17,20 @@ In più: **browser di modelli pronti** su MakerWorld, Printables e Thingiverse.
 - macOS 13 Ventura o successivo
 - Command Line Tools di Xcode: `xcode-select --install` (Xcode completo non serve)
 
+## Download
+
+Scarica `BambuGo.zip` dall'ultima [release](https://github.com/ifeldr/BambuGo/releases/latest),
+estrai l'app e spostala in *Applicazioni*. L'app non è firmata con un certificato Apple,
+quindi al primo avvio macOS la blocca: apri *Impostazioni di Sistema → Privacy e sicurezza*
+e premi **Apri comunque**, oppure da Terminale:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/BambuGo.app
+```
+
+Ogni push su `main` compila l'app con GitHub Actions; per pubblicare una nuova release
+basta creare un tag `vX.Y.Z` (es. `git tag v1.1.0 && git push --tags`).
+
 ## Compilazione e installazione
 
 ```bash
