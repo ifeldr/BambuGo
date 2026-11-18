@@ -16,7 +16,35 @@ permissions:
   contents: write
 
 jobs:
-  build:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      release: ${{ steps.version.outputs.release }}
+      build: ${{ steps.version.outputs.build }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Determina la versione
+        id: version
+        run: |
+          PLIST_VERSION=$(python3 -c "import plistlib; print(plistlib.load(open('Info.plist','rb'))['CFBundleShortVersionString'])")
+          RELEASE=""
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            RELEASE="${GITHUB_REF_NAME#v}"
+          elif [[ -n "${{ inputs.version }}" ]]; then
+            RELEASE="${{ inputs.version }}"
+          elif [[ "$GITHUB_EVENT_NAME" == "push" && "$GITHUB_REF" == "refs/heads/main" ]]; then
+            # Nuova versione in Info.plist senza tag corrispondente → release automatica
+            if [[ -z "$(git ls-remote --tags origin "refs/tags/v$PLIST_VERSION")" ]]; then
+              RELEASE="$PLIST_VERSION"
+            fi
+          fi
+          echo "release=$RELEASE" >> "$GITHUB_OUTPUT"
+          echo "build=${RELEASE:-$PLIST_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Versione: ${RELEASE:-$PLIST_VERSION} (release: ${RELEASE:-no})"
+
+  macos:
+    needs: version
     runs-on: macos-15-intel
     steps:
       - uses: actions/checkout@v5
@@ -24,26 +52,9 @@ jobs:
       - name: Versione Swift
         run: swift --version
 
-      - name: Determina la versione
-        id: version
-        run: |
-          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
-            echo "value=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
-          elif [[ -n "${{ inputs.version }}" ]]; then
-            echo "value=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
-          elif [[ "$GITHUB_EVENT_NAME" == "push" && "$GITHUB_REF" == "refs/heads/main" ]]; then
-            # Nuova versione in Info.plist senza tag corrispondente → release automatica
-            PLIST_VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" Info.plist)
-            if [[ -z "$(git ls-remote --tags origin "refs/tags/v$PLIST_VERSION")" ]]; then
-              echo "value=$PLIST_VERSION" >> "$GITHUB_OUTPUT"
-            fi
-          fi
-
       - name: Imposta la versione
-        if: steps.version.outputs.value != ''
         run: |
-          VERSION="${{ steps.version.outputs.value }}"
-          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" Info.plist
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${{ needs.version.outputs.build }}" Info.plist
           /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${{ github.run_number }}" Info.plist
 
       - name: Compila
@@ -60,15 +71,106 @@ jobs:
       - name: Carica l'artefatto
         uses: actions/upload-artifact@v4
         with:
-          name: BambuGo
+          name: BambuGo-macOS
           path: build/BambuGo.zip
 
+  desktop:
+    needs: version
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: ubuntu-22.04
+            name: Linux
+          - platform: windows-latest
+            name: Windows
+    runs-on: ${{ matrix.platform }}
+    defaults:
+      run:
+        working-directory: desktop
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Dipendenze di sistema (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf libssl-dev nasm
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri -> target
+
+      - name: Imposta la versione
+        shell: bash
+        run: |
+          VERSION="${{ needs.version.outputs.build }}"
+          PYTHON=$(command -v python3 || command -v python)
+          "$PYTHON" - "$VERSION" <<'PY'
+          import json, re, sys
+          version = sys.argv[1]
+          conf = json.load(open('src-tauri/tauri.conf.json'))
+          conf['version'] = version
+          json.dump(conf, open('src-tauri/tauri.conf.json', 'w'), indent=2, ensure_ascii=False)
+          cargo = open('src-tauri/Cargo.toml').read()
+          cargo = re.sub(r'^version = ".*"$', f'version = "{version}"', cargo, count=1, flags=re.M)
+          open('src-tauri/Cargo.toml', 'w').write(cargo)
+          PY
+
+      - name: Prove
+        if: runner.os == 'Linux'
+        working-directory: desktop/src-tauri
+        run: cargo test --lib
+
+      - name: Compila e crea i pacchetti
+        run: |
+          npm ci
+          npx tauri build
+
+      - name: Raccogli i pacchetti
+        shell: bash
+        run: |
+          mkdir -p ../dist
+          B=src-tauri/target/release/bundle
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            cp $B/deb/*.deb $B/rpm/*.rpm $B/appimage/*.AppImage ../dist/
+          else
+            cp $B/nsis/*.exe $B/msi/*.msi ../dist/
+          fi
+          ls -la ../dist
+
+      - name: Carica l'artefatto
+        uses: actions/upload-artifact@v4
+        with:
+          name: BambuGo-${{ matrix.name }}
+          path: dist/*
+
+  release:
+    needs: [version, macos, desktop]
+    if: needs.version.outputs.release != ''
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Elenco dei file
+        run: ls -la dist
+
       - name: Pubblica la release
-        if: steps.version.outputs.value != ''
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ steps.version.outputs.value }}
-          name: BambuGo ${{ steps.version.outputs.value }}
+          tag_name: v${{ needs.version.outputs.release }}
+          name: BambuGo ${{ needs.version.outputs.release }}
           target_commitish: ${{ github.sha }}
-          files: build/BambuGo.zip
+          files: dist/*
           generate_release_notes: true

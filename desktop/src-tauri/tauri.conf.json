@@ -1,0 +1,62 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "BambuGo",
+  "version": "1.4.0",
+  "identifier": "it.ifeldr.bambugo",
+  "build": {
+    "frontendDist": "../ui"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "label": "main",
+        "title": "BambuGo",
+        "width": 372,
+        "height": 720,
+        "minWidth": 340,
+        "minHeight": 420,
+        "resizable": true,
+        "visible": false,
+        "center": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; connect-src ipc: http://ipc.localhost"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["deb", "rpm", "appimage", "nsis", "msi"],
+    "publisher": "Lorenzo Garbi",
+    "copyright": "Lorenzo Garbi. Progetto indipendente, non affiliato a Bambu Lab.",
+    "category": "Utility",
+    "shortDescription": "Stato della stampante Bambu Lab in rete locale",
+    "longDescription": "BambuGo mostra nel tray lo stato di una macchina Bambu Lab (stampanti 3D e incisore laser R1) collegandosi direttamente in rete locale: avanzamento, comandi, telecamera, temperature, AMS ed errori.",
+    "license": "MIT",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.png",
+      "icons/icon.ico"
+    ],
+    "linux": {
+      "deb": {
+        "depends": ["libayatana-appindicator3-1"]
+      },
+      "rpm": {
+        "depends": ["libayatana-appindicator-gtk3"]
+      }
+    },
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser",
+        "languages": ["Italian", "English"]
+      },
+      "wix": {
+        "language": "it-IT"
+      }
+    }
+  }
+}
