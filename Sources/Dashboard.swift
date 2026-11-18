@@ -97,6 +97,7 @@ struct HeaderView: View {
     private var subtitleParts: [String] {
         var parts: [String] = []
         if !store.model.isEmpty && store.model != store.displayName { parts.append(store.model) }
+        if let tool = store.status.toolModule, store.state == .connected { parts.append(tool.name) }
         switch store.state {
         case .connected:
             parts.append(store.host)
@@ -211,8 +212,12 @@ struct DashboardView: View {
                 }
                 JobCard()
                 CameraCard()
-                TemperatureRow()
-                if !store.status.amsUnits.isEmpty || store.status.externalSpool.map({ !$0.isEmpty }) == true {
+                if store.isLaserWork {
+                    LaserCard()
+                } else {
+                    TemperatureRow()
+                }
+                if !store.status.amsUnits.isEmpty || store.status.externalSpools.contains(where: { !$0.isEmpty }) {
                     FilamentCard()
                 }
             }
@@ -233,12 +238,12 @@ struct JobCard: View {
                         .frame(width: 74, height: 74)
 
                     VStack(alignment: .leading, spacing: 5) {
-                        StatePill(text: s.stateName, color: color)
+                        StatePill(text: store.stateName, color: color)
                         Text(s.taskName.isEmpty ? "Lavoro senza nome" : s.taskName)
                             .font(.system(size: 13, weight: .semibold))
                             .lineLimit(2)
                             .fixedSize(horizontal: false, vertical: true)
-                        if s.totalLayers > 0 {
+                        if s.totalLayers > 0 && store.workMode == .fdm {
                             Label("Strato \(s.layer) di \(s.totalLayers)", systemImage: "square.stack.3d.up")
                                 .font(.system(size: 11))
                                 .foregroundStyle(.secondary)
@@ -259,7 +264,7 @@ struct JobCard: View {
                 }
                 Divider().padding(.vertical, 2)
                 PrintControls()
-                if let speed = s.speedName {
+                if let speed = s.speedName, store.workMode == .fdm {
                     HStack {
                         Label("Velocità", systemImage: "gauge.medium")
                             .foregroundStyle(.secondary)
@@ -307,11 +312,17 @@ struct JobCard: View {
     }
 
     private func idleTitle(_ state: String) -> String {
+        let fdm = store.workMode == .fdm
         switch state {
-        case "FINISH": return "Stampa completata"
-        case "FAILED": return "Stampa non riuscita"
-        case "IDLE", "": return "Pronta per stampare"
-        default: return store.status.stateName
+        case "FINISH": return fdm ? "Stampa completata" : "Lavoro completato"
+        case "FAILED": return fdm ? "Stampa non riuscita" : "Lavoro non riuscito"
+        case "IDLE", "":
+            switch store.workMode {
+            case .fdm: return "Pronta per stampare"
+            case .laser: return "Pronta per incidere"
+            case .cut: return "Pronta per tagliare"
+            }
+        default: return store.stateName
         }
     }
 }
@@ -372,7 +383,7 @@ struct PrintControls: View {
         let busy = store.pendingCommand != nil
         HStack(spacing: 8) {
             if confirmStop {
-                Text("Interrompere la stampa?")
+                Text(store.workMode == .fdm ? "Interrompere la stampa?" : "Interrompere il lavoro?")
                     .font(.system(size: 11, weight: .medium))
                 Spacer()
                 ControlButton(title: "No", systemImage: "arrow.uturn.backward", color: .gray) {
@@ -461,14 +472,14 @@ struct ErrorsCard: View {
                 ErrorRow(title: printErrorTitle(s.printError),
                          detail: "Codice \(printErrorCode(s.printError))",
                          severity: "Stampa", color: .red,
-                         url: URL(string: "https://wiki.bambulab.com/en/x1/troubleshooting/hmscode/\(printErrorCode(s.printError))"))
+                         url: URL(string: "https://wiki.bambulab.com/en/\(PrinterModels.wikiSection(store.model))/troubleshooting/hmscode/\(printErrorCode(s.printError))"))
             }
 
             if !printerAlerts.isEmpty {
                 section("Stampante")
                 ForEach(printerAlerts) { alert in
                     ErrorRow(title: alert.module, detail: alert.fullCode, severity: alert.severityName,
-                             color: color(alert.severity), url: alert.wikiURL)
+                             color: color(alert.severity), url: alert.wikiURL(model: store.model))
                 }
             }
 
@@ -476,7 +487,7 @@ struct ErrorsCard: View {
                 section("AMS")
                 ForEach(amsAlerts) { alert in
                     ErrorRow(title: alert.amsDetail ?? alert.module, detail: alert.fullCode, severity: alert.severityName,
-                             color: color(alert.severity), url: alert.wikiURL)
+                             color: color(alert.severity), url: alert.wikiURL(model: store.model))
                 }
             }
         }
@@ -505,9 +516,11 @@ struct ErrorsCard: View {
     private func printErrorTitle(_ code: Int) -> String {
         switch code {
         case 0x0300_400C: return "Stampa annullata"
-        case 0x0700_8011, 0x0701_8011, 0x0702_8011, 0x0703_8011, 0x07FF_8011: return "Filamento esaurito"
         default:
-            return (code >> 24) & 0xFF == 0x07 ? "Problema dell'AMS" : "Errore di stampa"
+            let module = (code >> 24) & 0xFF
+            if [0x07, 0x12, 0x18].contains(module) && code & 0xFFFF == 0x8011 { return "Filamento esaurito" }
+            if [0x07, 0x12, 0x18].contains(module) { return "Problema dell'AMS" }
+            return store.workMode == .fdm ? "Errore di stampa" : "Errore del lavoro"
         }
     }
 }
@@ -553,11 +566,23 @@ struct TemperatureRow: View {
 
     var body: some View {
         let s = store.status
-        HStack(spacing: 8) {
-            TempTile(title: "Ugello", systemImage: "flame", current: s.nozzle, target: s.nozzleTarget)
-            TempTile(title: "Piatto", systemImage: "square.split.bottomrightquarter", current: s.bed, target: s.bedTarget)
+        let compact = s.isDualNozzle && store.hasChamberSensor
+        HStack(spacing: compact ? 6 : 8) {
+            if s.isDualNozzle {
+                ForEach(s.nozzles) { nozzle in
+                    TempTile(title: "Ugello \(nozzle.sideLetter)", systemImage: "flame",
+                             current: nozzle.current, target: nozzle.target,
+                             highlighted: nozzle.id == s.activeExtruder && s.isActive, compact: compact)
+                        .help("Ugello \(nozzle.sideName.lowercased())\(nozzle.id == s.activeExtruder ? " – in uso" : "")")
+                }
+            } else {
+                TempTile(title: "Ugello", systemImage: "flame", current: s.nozzle, target: s.nozzleTarget)
+            }
+            TempTile(title: "Piatto", systemImage: "square.split.bottomrightquarter", current: s.bed, target: s.bedTarget,
+                     compact: compact)
             if store.hasChamberSensor {
-                TempTile(title: "Camera", systemImage: "thermometer", current: s.chamber, target: nil, ambient: true)
+                TempTile(title: "Camera", systemImage: "thermometer", current: s.chamber, target: s.chamberTarget,
+                         ambient: true, compact: compact)
             }
         }
     }
@@ -569,6 +594,8 @@ struct TempTile: View {
     let current: Double?
     let target: Double?
     var ambient = false
+    var highlighted = false
+    var compact = false
 
     private var heating: Bool { (target ?? 0) > 0 }
 
@@ -581,11 +608,15 @@ struct TempTile: View {
                 Text(title)
                     .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                if highlighted {
+                    Circle().fill(Palette.brandB).frame(width: 5, height: 5)
+                }
             }
 
             HStack(alignment: .firstTextBaseline, spacing: 1) {
                 Text(current.map { "\(Int($0.rounded()))" } ?? "–")
-                    .font(.system(size: 20, weight: .semibold, design: .rounded))
+                    .font(.system(size: compact ? 17 : 20, weight: .semibold, design: .rounded))
                     .monospacedDigit()
                 Text("°C")
                     .font(.system(size: 10, weight: .medium))
@@ -605,7 +636,7 @@ struct TempTile: View {
                         }
                     }
                     .frame(height: 3)
-                    Text("obiettivo \(Int(target.rounded()))°")
+                    Text(compact ? "→ \(Int(target.rounded()))°" : "obiettivo \(Int(target.rounded()))°")
                         .font(.system(size: 9))
                         .foregroundStyle(.secondary)
                         .monospacedDigit()
@@ -618,8 +649,58 @@ struct TempTile: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(10)
+        .padding(compact ? 8 : 10)
         .background(CardBackground())
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(Palette.brandB.opacity(highlighted ? 0.6 : 0), lineWidth: 1)
+        )
+    }
+}
+
+// MARK: - Laser e taglio
+
+/// Al posto delle temperature quando la macchina lavora con il laser o la lama.
+struct LaserCard: View {
+    @EnvironmentObject var store: PrinterStore
+
+    var body: some View {
+        let s = store.status
+        let cut = store.workMode == .cut
+        Card {
+            HStack(spacing: 12) {
+                ZStack {
+                    Circle().fill(Color.red.opacity(0.14))
+                    Image(systemName: s.toolModule?.systemImage ?? (cut ? "scissors" : "rays"))
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(Color.red)
+                }
+                .frame(width: 36, height: 36)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(cut ? "Modalità taglio" : "Modalità laser")
+                        .font(.system(size: 12, weight: .semibold))
+                    Text(subtitle)
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                }
+                Spacer(minLength: 4)
+                if store.hasChamberSensor, let chamber = s.chamber {
+                    Label("\(Int(chamber.rounded()))°", systemImage: "thermometer")
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                        .labelStyle(CompactLabelStyle())
+                        .help("Temperatura in camera")
+                }
+            }
+        }
+    }
+
+    private var subtitle: String {
+        if let tool = store.status.toolModule { return "\(tool.name) montato" }
+        if PrinterModels.isLaserMachine(store.model) { return "Incisore e taglierina laser" }
+        return store.workMode == .cut ? "Modulo da taglio" : "Modulo laser"
     }
 }
 
@@ -630,48 +711,131 @@ struct FilamentCard: View {
 
     var body: some View {
         let s = store.status
+        let multi = s.amsUnits.filter { !$0.isSingleSlot }
+        let singles = s.amsUnits.filter { $0.isSingleSlot }
+        let externals = s.externalSpools.filter { !$0.isEmpty }
         Card {
             VStack(alignment: .leading, spacing: 10) {
-                ForEach(s.amsUnits) { unit in
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack(spacing: 6) {
-                            Text(s.amsUnits.count > 1 ? "AMS \(String(UnicodeScalar(UInt8(65 + min(max(unit.id, 0), 25)))))" : "AMS")
-                                .font(.system(size: 11, weight: .semibold))
-                            Spacer()
-                            if let humidity = unit.humidity {
-                                Label("\(humidity)%", systemImage: "humidity")
-                                    .help("Umidità nell'AMS")
-                            }
-                            if let temp = unit.temperature, temp > 0 {
-                                Label("\(Int(temp.rounded()))°", systemImage: "thermometer")
-                            }
-                        }
-                        .font(.system(size: 10))
-                        .foregroundStyle(.secondary)
-                        .labelStyle(CompactLabelStyle())
+                ForEach(Array(multi.enumerated()), id: \.element.id) { index, unit in
+                    if index > 0 { Divider() }
+                    AMSUnitView(unit: unit, title: title(unit, multiple: multi.count > 1))
+                }
 
-                        HStack(spacing: 0) {
-                            ForEach(unit.trays) { tray in
-                                SpoolView(tray: tray).frame(maxWidth: .infinity)
+                if !singles.isEmpty {
+                    if !multi.isEmpty { Divider() }
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(singles.count > 1 ? "\(store.amsModel(singles[0])) ×\(singles.count)" : store.amsModel(singles[0]))
+                            .font(.system(size: 11, weight: .semibold))
+                        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 0), count: 4), spacing: 10) {
+                            ForEach(singles) { unit in
+                                if let tray = unit.trays.first {
+                                    VStack(spacing: 3) {
+                                        SpoolView(tray: tray)
+                                        UnitClimate(unit: unit, compact: true)
+                                    }
+                                }
                             }
                         }
                     }
                 }
 
-                if let ext = s.externalSpool, !ext.isEmpty {
+                if !externals.isEmpty {
                     if !s.amsUnits.isEmpty { Divider() }
-                    HStack(spacing: 10) {
-                        SpoolDisc(tray: ext, size: 22)
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text("Bobina esterna").font(.system(size: 11, weight: .semibold))
-                            Text(ext.type).font(.system(size: 10)).foregroundStyle(.secondary)
+                    ForEach(externals) { ext in
+                        HStack(spacing: 10) {
+                            SpoolDisc(tray: ext, size: 22)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(externalTitle(ext, dual: s.isDualNozzle))
+                                    .font(.system(size: 11, weight: .semibold))
+                                Text(ext.type).font(.system(size: 10)).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            if ext.active {
+                                StatePill(text: "in uso", color: Palette.brandB)
+                            } else if ext.loadedOn != nil {
+                                StatePill(text: "caricata", color: .secondary)
+                            }
                         }
-                        Spacer()
-                        if ext.active { StatePill(text: "in uso", color: Palette.brandB) }
                     }
                 }
             }
         }
+    }
+
+    private func title(_ unit: AMSUnit, multiple: Bool) -> String {
+        let model = store.amsModel(unit)
+        return multiple ? "\(model) · \(AMSUnit.letter(unit.id))" : model
+    }
+
+    private func externalTitle(_ tray: AMSTray, dual: Bool) -> String {
+        guard dual else { return "Bobina esterna" }
+        if tray.id == "ext-254" { return "Bobina esterna sinistra" }
+        if tray.id == "ext-255" { return "Bobina esterna destra" }
+        return "Bobina esterna"
+    }
+}
+
+/// Un'unità AMS con più slot (AMS, AMS lite, AMS 2 Pro, AMS 3H).
+struct AMSUnitView: View {
+    let unit: AMSUnit
+    let title: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Text(title)
+                    .font(.system(size: 11, weight: .semibold))
+                    .lineLimit(1)
+                if let nozzle = unit.nozzle {
+                    Text("→ \(nozzle)")
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 5).padding(.vertical, 1)
+                        .background(Capsule().fill(Color.primary.opacity(0.07)))
+                        .help("Ugello a cui è collegata l'unità")
+                }
+                Spacer(minLength: 4)
+                UnitClimate(unit: unit, compact: false)
+            }
+
+            if unit.trays.count <= 4 {
+                HStack(spacing: 0) {
+                    ForEach(unit.trays) { tray in
+                        SpoolView(tray: tray).frame(maxWidth: .infinity)
+                    }
+                }
+            } else {
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 0), count: 5), spacing: 10) {
+                    ForEach(unit.trays) { tray in SpoolView(tray: tray) }
+                }
+            }
+        }
+    }
+}
+
+/// Umidità, temperatura ed essiccazione di un'unità AMS.
+struct UnitClimate: View {
+    let unit: AMSUnit
+    let compact: Bool
+
+    var body: some View {
+        HStack(spacing: 6) {
+            if unit.dryingMinutes > 0 {
+                Label(compact ? "" : PrinterStore.formatMinutes(unit.dryingMinutes), systemImage: "wind")
+                    .foregroundStyle(Palette.heat)
+                    .help("Essiccazione in corso: \(PrinterStore.formatMinutes(unit.dryingMinutes)) rimanenti")
+            }
+            if let humidity = unit.humidity {
+                Label("\(humidity)%", systemImage: "humidity")
+                    .help("Umidità nell'AMS")
+            }
+            if !compact, let temp = unit.temperature, temp > 0 {
+                Label("\(Int(temp.rounded()))°", systemImage: "thermometer")
+            }
+        }
+        .font(.system(size: compact ? 9 : 10))
+        .foregroundStyle(.secondary)
+        .labelStyle(CompactLabelStyle())
     }
 }
 
@@ -690,6 +854,16 @@ struct SpoolView: View {
     var body: some View {
         VStack(spacing: 5) {
             SpoolDisc(tray: tray, size: 34)
+                .overlay(alignment: .topTrailing) {
+                    if let side = tray.loadedOn {
+                        Text(side)
+                            .font(.system(size: 8, weight: .bold))
+                            .foregroundStyle(.white)
+                            .frame(width: 13, height: 13)
+                            .background(Circle().fill(tray.active ? Palette.brandB : Color.gray))
+                            .help(side == "S" ? "Caricata nell'ugello sinistro" : "Caricata nell'ugello destro")
+                    }
+                }
             Text(tray.isEmpty ? "Vuoto" : tray.type)
                 .font(.system(size: 10, weight: .medium))
                 .foregroundStyle(tray.isEmpty ? HierarchicalShapeStyle.tertiary : HierarchicalShapeStyle.primary)
@@ -698,6 +872,7 @@ struct SpoolView: View {
                 .font(.system(size: 9))
                 .foregroundStyle(.secondary)
                 .monospacedDigit()
+                .lineLimit(1)
         }
         .help(helpText)
     }

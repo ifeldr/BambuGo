@@ -10,226 +10,6 @@ enum ConnectionState: Equatable {
     case error(String)
 }
 
-struct PrintStatus {
-    var gcodeState = ""
-    var percent = 0
-    var remainingMinutes = 0
-    var layer = 0
-    var totalLayers = 0
-    var nozzle: Double?
-    var nozzleTarget: Double?
-    var bed: Double?
-    var bedTarget: Double?
-    var chamber: Double?
-    var taskName = ""
-    var printError = 0
-    var speedLevel = 0
-    var wifiSignal: Int?
-    var amsUnits: [AMSUnit] = []
-    var externalSpool: AMSTray?
-    var hms: [HMSAlert] = []
-    var lightOn: Bool?
-
-    init() {}
-
-    init(dict: [String: Any]) {
-        gcodeState = (dict["gcode_state"] as? String ?? "").uppercased()
-        percent = Self.int(dict["mc_percent"]) ?? 0
-        remainingMinutes = Self.int(dict["mc_remaining_time"]) ?? 0
-        layer = Self.int(dict["layer_num"]) ?? 0
-        totalLayers = Self.int(dict["total_layer_num"]) ?? 0
-        nozzle = Self.double(dict["nozzle_temper"])
-        nozzleTarget = Self.double(dict["nozzle_target_temper"])
-        bed = Self.double(dict["bed_temper"])
-        bedTarget = Self.double(dict["bed_target_temper"])
-        chamber = Self.double(dict["chamber_temper"])
-        printError = Self.int(dict["print_error"]) ?? 0
-        speedLevel = Self.int(dict["spd_lvl"]) ?? 0
-        if let wifi = dict["wifi_signal"] as? String {
-            wifiSignal = Int(wifi.filter { $0.isNumber || $0 == "-" })
-        }
-
-        if let ams = dict["ams"] as? [String: Any] {
-            let trayNow = Self.int(ams["tray_now"]) ?? 255
-            let units = ams["ams"] as? [[String: Any]] ?? []
-            amsUnits = units.enumerated().map { (index, unit) -> AMSUnit in
-                let unitID = Self.int(unit["id"]) ?? index
-                let trays = (unit["tray"] as? [[String: Any]] ?? []).enumerated().map { (slotIndex, tray) -> AMSTray in
-                    let slot = Self.int(tray["id"]) ?? slotIndex
-                    let letter = String(UnicodeScalar(UInt8(65 + min(max(unitID, 0), 25))))
-                    return AMSTray(dict: tray, id: "\(unitID)-\(slot)", label: "\(letter)\(slot + 1)",
-                                   active: unitID * 4 + slot == trayNow)
-                }
-                var humidity = Self.int(unit["humidity_raw"])
-                if humidity == 0 { humidity = nil }
-                return AMSUnit(id: unitID, humidity: humidity, temperature: Self.double(unit["temp"]),
-                               trays: trays)
-            }
-            if let vt = dict["vt_tray"] as? [String: Any] {
-                externalSpool = AMSTray(dict: vt, id: "ext", label: "Est.", active: trayNow == 254)
-            }
-        } else if let vt = dict["vt_tray"] as? [String: Any] {
-            externalSpool = AMSTray(dict: vt, id: "ext", label: "Est.", active: false)
-        }
-
-        hms = (dict["hms"] as? [[String: Any]] ?? []).compactMap { item in
-            guard let attr = Self.int(item["attr"]), let code = Self.int(item["code"]) else { return nil }
-            return HMSAlert(attr: attr, code: code)
-        }
-        if let lights = dict["lights_report"] as? [[String: Any]],
-           let chamber = lights.first(where: { ($0["node"] as? String) == "chamber_light" }) {
-            lightOn = (chamber["mode"] as? String) == "on"
-        }
-
-        var name = (dict["subtask_name"] as? String) ?? ""
-        if name.isEmpty { name = (dict["gcode_file"] as? String) ?? "" }
-        for ext in [".gcode.3mf", ".3mf", ".gcode"] where name.lowercased().hasSuffix(ext) {
-            name = String(name.dropLast(ext.count))
-            break
-        }
-        taskName = name
-    }
-
-    var isActive: Bool { ["RUNNING", "PAUSE", "PREPARE", "SLICING"].contains(gcodeState) }
-
-    var stateName: String {
-        switch gcodeState {
-        case "RUNNING": return "In stampa"
-        case "PAUSE": return "In pausa"
-        case "PREPARE": return "Preparazione"
-        case "SLICING": return "Slicing"
-        case "FINISH": return "Stampa completata"
-        case "FAILED": return "Stampa fallita"
-        case "IDLE": return "Pronta"
-        case "": return "Sconosciuto"
-        default: return gcodeState.capitalized
-        }
-    }
-
-    var speedName: String? {
-        switch speedLevel {
-        case 1: return "Silenziosa"
-        case 2: return "Standard"
-        case 3: return "Sport"
-        case 4: return "Ludicrous"
-        default: return nil
-        }
-    }
-
-    static func double(_ value: Any?) -> Double? {
-        if let n = value as? NSNumber { return n.doubleValue }
-        if let s = value as? String { return Double(s) }
-        return nil
-    }
-
-    static func int(_ value: Any?) -> Int? {
-        double(value).map { Int($0) }
-    }
-}
-
-struct AMSTray: Identifiable {
-    let id: String
-    let label: String
-    let type: String
-    let colorHex: String
-    let remain: Int?
-    let active: Bool
-
-    var isEmpty: Bool { type.isEmpty }
-
-    init(dict: [String: Any], id: String, label: String, active: Bool) {
-        self.id = id
-        self.label = label
-        self.active = active
-        type = (dict["tray_type"] as? String ?? "").trimmingCharacters(in: .whitespaces)
-        colorHex = dict["tray_color"] as? String ?? ""
-        let value = PrintStatus.int(dict["remain"])
-        remain = (value ?? -1) >= 0 ? value : nil
-    }
-}
-
-/// Messaggio HMS (Health Management System) della stampante.
-struct HMSAlert: Identifiable, Hashable {
-    let attr: Int
-    let code: Int
-
-    var id: String { fullCode }
-
-    var fullCode: String {
-        String(format: "%04X_%04X_%04X_%04X", (attr >> 16) & 0xFFFF, attr & 0xFFFF, (code >> 16) & 0xFFFF, code & 0xFFFF)
-    }
-
-    /// Modulo da cui arriva l'avviso.
-    var module: String {
-        switch (attr >> 24) & 0xFF {
-        case 0x03: return "Movimento"
-        case 0x05: return "Scheda madre"
-        case 0x07: return "AMS"
-        case 0x08: return "Testina"
-        case 0x0C: return "Telecamera / AI"
-        case 0x12: return "AMS lite"
-        default: return "Stampante"
-        }
-    }
-
-    var isAMS: Bool { [0x07, 0x12].contains((attr >> 24) & 0xFF) }
-
-    /// AMS e slot coinvolti, se l'avviso riguarda una bobina.
-    var amsDetail: String? {
-        guard isAMS else { return nil }
-        let unit = (attr >> 16) & 0xFF
-        let slot = (attr >> 8) & 0xFF
-        let letter = String(UnicodeScalar(UInt8(65 + min(unit, 25))))
-        return slot < 4 ? "AMS \(letter), slot \(slot + 1)" : "AMS \(letter)"
-    }
-
-    /// 1 = fatale, 2 = grave, 3 = normale, 4 = informazione
-    var severity: Int { (code >> 16) & 0xFFFF }
-
-    var severityName: String {
-        switch severity {
-        case 1: return "Fatale"
-        case 2: return "Grave"
-        case 3: return "Avviso"
-        default: return "Info"
-        }
-    }
-
-    var wikiURL: URL? {
-        URL(string: "https://wiki.bambulab.com/en/x1/troubleshooting/hmscode/\(fullCode)")
-    }
-}
-
-struct AMSUnit: Identifiable {
-    let id: Int
-    let humidity: Int?
-    let temperature: Double?
-    let trays: [AMSTray]
-}
-
-/// Modelli noti, dai prefissi del numero di serie e dai codici interni.
-enum PrinterModels {
-    static func fromSerial(_ serial: String) -> String? {
-        let prefixes: [String: String] = [
-            "00M": "X1C", "00W": "X1", "03W": "X1E",
-            "01S": "P1P", "01P": "P1S",
-            "030": "A1 mini", "039": "A1",
-            "094": "H2D",
-        ]
-        return prefixes[String(serial.uppercased().prefix(3))]
-    }
-
-    static func fromCode(_ code: String) -> String? {
-        let codes: [String: String] = [
-            "BL-P001": "X1C", "BL-P002": "X1", "C13": "X1E",
-            "C11": "P1P", "C12": "P1S",
-            "N1": "A1 mini", "N2S": "A1",
-            "O1D": "H2D",
-        ]
-        return codes[code.uppercased()]
-    }
-}
-
 @MainActor
 final class PrinterStore: ObservableObject {
     // Configurazione (solo rete locale)
@@ -238,6 +18,8 @@ final class PrinterStore: ObservableObject {
     @Published private(set) var accessCode: String
     @Published private(set) var customName: String
     @Published private(set) var detectedModel: String
+    /// Modello di ciascuna unità AMS (id → "AMS 2 Pro", "AMS HT"…), da get_version.
+    @Published private(set) var amsModels: [Int: String] = [:]
     @Published private(set) var notificationsEnabled: Bool
     @Published private(set) var loginItemError: String?
 
@@ -326,6 +108,7 @@ final class PrinterStore: ObservableObject {
         lastUpdate = nil
         commandMessage = nil
         pendingCommand = nil
+        amsModels = [:]
 
         guard isConfigured else { state = .notConfigured; return }
         let newClient = MQTTClient(host: host, username: "bblp", password: accessCode,
@@ -389,10 +172,20 @@ final class PrinterStore: ObservableObject {
     func setLight(_ on: Bool) {
         guard state == .connected else { return }
         let mode = on ? "on" : "off"
-        publish(#"{"system":{"sequence_id":"0","command":"ledctrl","led_node":"chamber_light","led_mode":""# + mode
-                + #"","led_on_time":500,"led_off_time":500,"loop_times":0,"interval_time":0}}"#)
+        // Le H2 hanno una seconda luce in camera: le comandiamo insieme.
+        var nodes = ["chamber_light"]
+        if status.hasSecondLight { nodes.append("chamber_light2") }
+        for node in nodes {
+            publish(#"{"system":{"sequence_id":"0","command":"ledctrl","led_node":""# + node + #"","led_mode":""# + mode
+                    + #"","led_on_time":500,"led_off_time":500,"loop_times":0,"interval_time":0}}"#)
+        }
         status.lightOn = on   // aggiornamento ottimistico
-        raw["lights_report"] = [["node": "chamber_light", "mode": mode]]
+        var lights = raw["lights_report"] as? [[String: Any]] ?? []
+        for node in nodes {
+            lights.removeAll { ($0["node"] as? String) == node }
+            lights.append(["node": node, "mode": mode])
+        }
+        raw["lights_report"] = lights
     }
 
     private func sendPrintCommand(_ command: String) {
@@ -427,20 +220,51 @@ final class PrinterStore: ObservableObject {
     private func handleVersion(_ info: [String: Any]) {
         guard (info["command"] as? String) == "get_version",
               let modules = info["module"] as? [[String: Any]] else { return }
-        var found: String?
+
+        // Modello della stampante: prima il nome commerciale del modulo "ota",
+        // poi qualunque "Bambu Lab …", infine il codice interno.
+        var fromOTA: String?
+        var fromProduct: String?
+        var fromCode: String?
+        var units: [Int: String] = [:]
         for module in modules {
-            if let product = module["product_name"] as? String, !product.isEmpty {
-                found = product.replacingOccurrences(of: "Bambu Lab ", with: "")
-                break
+            let name = module["name"] as? String ?? ""
+            if let unit = Self.amsUnit(module: module, name: name) {
+                units[unit.id] = unit.model
+                continue
             }
-            if let code = module["project_name"] as? String, let model = PrinterModels.fromCode(code) {
-                found = model
+            if let product = module["product_name"] as? String, let model = PrinterModels.fromProductName(product) {
+                if name == "ota" { fromOTA = model } else if fromProduct == nil { fromProduct = model }
+            }
+            if fromCode == nil, let code = module["project_name"] as? String, let model = PrinterModels.fromCode(code) {
+                fromCode = model
             }
         }
-        if let found, found != detectedModel {
+        if !units.isEmpty { amsModels = units }
+        if let found = fromOTA ?? fromProduct ?? fromCode, found != detectedModel {
             detectedModel = found
             defaults.set(found, forKey: "printerModel")
         }
+    }
+
+    /// Riconosce le unità AMS tra i moduli di get_version (es. "n3f/0" = AMS 2 Pro, unità A).
+    private static func amsUnit(module: [String: Any], name: String) -> (id: Int, model: String)? {
+        let prefixes: [(String, String)] = [
+            ("ams_f1/", "AMS lite"), ("ams/", "AMS"), ("n3f/", "AMS 2 Pro"), ("n3s/", "AMS HT"), ("n10a/", "AMS 3H"),
+        ]
+        for (prefix, model) in prefixes where name.hasPrefix(prefix) {
+            guard let id = Int(name.dropFirst(prefix.count)) else { return nil }
+            return (id, model)
+        }
+        if name == "n10a" {
+            return (PrintStatus.int(module["id"]) ?? -1, "AMS 3H")
+        }
+        return nil
+    }
+
+    /// Nome del modello di un'unità AMS.
+    func amsModel(_ unit: AMSUnit) -> String {
+        amsModels[unit.id] ?? (unit.trays.count > 4 ? amsModels[-1] : nil) ?? unit.guessedModel(printer: model)
     }
 
     private func handle(_ data: Data) {
@@ -463,11 +287,27 @@ final class PrinterStore: ObservableObject {
         notifyTransition(from: previousState, to: newStatus)
     }
 
-    private static func deepMerge(_ base: [String: Any], _ update: [String: Any]) -> [String: Any] {
+    /// Nel blocco "device" (ugelli, moduli…) gli elenchi possono arrivare a pezzi:
+    /// li uniamo per "id". Altrove (es. bobine AMS) l'elenco nuovo sostituisce il vecchio,
+    /// così uno slot svuotato non conserva il filamento precedente.
+    private static func deepMerge(_ base: [String: Any], _ update: [String: Any], mergeLists: Bool = false) -> [String: Any] {
         var result = base
         for (key, value) in update {
+            let merge = mergeLists || key == "device"
             if let old = result[key] as? [String: Any], let new = value as? [String: Any] {
-                result[key] = deepMerge(old, new)
+                result[key] = deepMerge(old, new, mergeLists: merge)
+            } else if mergeLists, let old = result[key] as? [[String: Any]], let new = value as? [[String: Any]],
+                      !new.isEmpty, new.allSatisfy({ $0["id"] != nil }), old.allSatisfy({ $0["id"] != nil }) {
+                var merged = old
+                for item in new {
+                    let id = "\(item["id"]!)"
+                    if let index = merged.firstIndex(where: { "\($0["id"]!)" == id }) {
+                        merged[index] = deepMerge(merged[index], item, mergeLists: true)
+                    } else {
+                        merged.append(item)
+                    }
+                }
+                result[key] = merged
             } else {
                 result[key] = value
             }
@@ -487,18 +327,33 @@ final class PrinterStore: ObservableObject {
         isConfigured ? (host, accessCode) : nil
     }
 
-    /// X1 e H2 trasmettono in RTSP; P1 e A1 con il flusso JPEG sulla porta 6000.
+    /// P1, A1 e A2 trasmettono JPEG sulla porta 6000; X1, X2, P2, H2, H3 e R1 in RTSP.
     /// Se il modello non è noto si prova il JPEG e, se non risponde, si passa a RTSP.
     var cameraUsesRTSP: Bool {
-        let m = model.uppercased()
-        return m.hasPrefix("X1") || m.hasPrefix("H2")
+        !model.isEmpty && !PrinterModels.usesJPEGCamera(model)
     }
 
-    /// P1 e A1 non hanno il sensore in camera: il valore riportato non è reale.
+    /// P1, A1 e A2 non hanno il sensore in camera: il valore riportato non è reale.
     var hasChamberSensor: Bool {
-        let m = model.uppercased()
-        if m.hasPrefix("P1") || m.hasPrefix("A1") { return false }
+        if PrinterModels.lacksChamberSensor(model) { return false }
         return (status.chamber ?? 0) > 5
+    }
+
+    /// Incisore laser dedicato (R1) o H2 con modulo laser/lama in uso.
+    var isLaserWork: Bool {
+        PrinterModels.isLaserMachine(model) || status.workMode != .fdm
+    }
+
+    /// Nome dello stato, tenendo conto della modalità di lavoro.
+    var stateName: String {
+        var adjusted = status
+        adjusted.workMode = workMode
+        return adjusted.stateName
+    }
+
+    /// Modalità di lavoro effettiva: la R1 è sempre laser.
+    var workMode: WorkMode {
+        PrinterModels.isLaserMachine(model) && status.workMode == .fdm ? .laser : status.workMode
     }
 
     // MARK: - Barra dei menu
@@ -545,14 +400,15 @@ final class PrinterStore: ObservableObject {
     private func notifyTransition(from previous: String, to new: PrintStatus) {
         guard notificationsEnabled, !previous.isEmpty, previous != new.gcodeState else { return }
         let name = new.taskName.isEmpty ? displayName : new.taskName
+        let job = workMode == .fdm ? "Stampa" : "Lavoro"
 
         switch new.gcodeState {
         case "FINISH" where ["RUNNING", "PAUSE", "PREPARE"].contains(previous):
-            sendNotification(title: "Stampa completata ✅", body: name)
+            sendNotification(title: workMode == .fdm ? "Stampa completata ✅" : "Lavoro completato ✅", body: name)
         case "FAILED":
-            sendNotification(title: "Stampa fallita ❌", body: name)
+            sendNotification(title: workMode == .fdm ? "Stampa fallita ❌" : "Lavoro non riuscito ❌", body: name)
         case "PAUSE" where previous == "RUNNING":
-            sendNotification(title: "Stampa in pausa ⏸", body: "\(name) – controlla la stampante")
+            sendNotification(title: "\(job) in pausa ⏸", body: "\(name) – controlla la macchina")
         default:
             break
         }
