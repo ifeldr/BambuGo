@@ -27,7 +27,13 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["deb", "rpm", "appimage", "nsis", "msi"],
+    "targets": [
+      "deb",
+      "rpm",
+      "appimage",
+      "nsis",
+      "msi"
+    ],
     "publisher": "Lorenzo Garbi",
     "copyright": "Lorenzo Garbi. Progetto indipendente, non affiliato a Bambu Lab.",
     "category": "Utility",
@@ -42,17 +48,19 @@
       "icons/icon.ico"
     ],
     "linux": {
-      "deb": {
-        "depends": ["libayatana-appindicator3-1"]
-      },
       "rpm": {
-        "depends": ["libayatana-appindicator-gtk3"]
+        "depends": [
+          "libayatana-appindicator-gtk3"
+        ]
       }
     },
     "windows": {
       "nsis": {
         "installMode": "currentUser",
-        "languages": ["Italian", "English"]
+        "languages": [
+          "Italian",
+          "English"
+        ]
       },
       "wix": {
         "language": "it-IT"
