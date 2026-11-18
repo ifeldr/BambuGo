@@ -5,11 +5,11 @@
 [![Offrimi un caffè](https://img.shields.io/badge/☕_Offrimi_un_caffè-PayPal-0070ba?logo=paypal&logoColor=white)](https://www.paypal.me/lorenzogarbi)
 [![Licenza MIT](https://img.shields.io/badge/licenza-MIT-green)](LICENSE)
 
-App per la barra dei menu di macOS che mostra lo stato di una macchina Bambu Lab
+App per **macOS, Windows e Linux** che mostra nella barra dei menu (o nel tray) lo stato di una macchina Bambu Lab
 (tutte le stampanti 3D, dalla A1 mini alla H3C, e l'incisore laser R1) collegandosi
 **direttamente in rete locale**: nessun account, nessun cloud, nessun dato che esce dalla tua rete.
 
-Nella barra compare una piccola stampante: durante la stampa l'oggetto sul piatto cresce
+Nella barra compare una piccola stampante (su Windows e Linux un'icona colorata nel tray): durante la stampa l'oggetto sul piatto cresce
 con l'avanzamento, accanto a `45% · 1h 12m`; un simbolo indica pausa, fine o errori.
 Cliccando si apre un pannello a schede con:
 
@@ -25,7 +25,8 @@ Cliccando si apre un pannello a schede con:
 
 Notifiche a fine stampa, errore e pausa (es. filamento finito).
 
-In più: **browser di modelli pronti** su MakerWorld, Printables e Thingiverse.
+In più: **browser di modelli pronti** su MakerWorld, Printables e Thingiverse
+(su Windows e Linux i siti si aprono nel browser predefinito).
 
 > BambuGo è un progetto indipendente e non è affiliato, approvato o sponsorizzato da Bambu Lab.
 > "Bambu Lab" e i nomi delle stampanti sono marchi dei rispettivi proprietari.
@@ -35,23 +36,43 @@ In più: **browser di modelli pronti** su MakerWorld, Printables e Thingiverse.
 
 ## Requisiti
 
-- macOS 13 Ventura o successivo
-- Il Mac deve raggiungere la stampante (stessa rete, oppure VPN verso casa)
+- **macOS** 13 Ventura o successivo
+- **Windows** 10 o 11 (64 bit)
+- **Linux** a 64 bit: Ubuntu 22.04+, Debian 12+, Fedora 39+, Arch Linux e derivate
+- Il computer deve raggiungere la stampante (stessa rete, oppure VPN verso casa)
 
 ## Download
 
-Scarica `BambuGo.zip` dall'ultima [release](https://github.com/ifeldr/BambuGo/releases/latest),
-estrai l'app e spostala in *Applicazioni*. L'app non è firmata con un certificato Apple,
-quindi al primo avvio macOS la blocca: apri *Impostazioni di Sistema → Privacy e sicurezza*
-e premi **Apri comunque**, oppure da Terminale:
+Tutti i pacchetti sono nell'ultima [release](https://github.com/ifeldr/BambuGo/releases/latest).
+
+| Sistema | File | Installazione |
+|---|---|---|
+| macOS | `BambuGo.zip` | estrai e sposta l'app in *Applicazioni* (vedi sotto) |
+| Windows | `BambuGo_…_x64-setup.exe` oppure `BambuGo_…_x64_it-IT.msi` | doppio clic |
+| Ubuntu / Debian | `BambuGo_…_amd64.deb` | `sudo apt install ./BambuGo_*_amd64.deb` |
+| Fedora | `BambuGo-…x86_64.rpm` | `sudo dnf install ./BambuGo-*.x86_64.rpm` |
+| Arch e altre distro | `BambuGo_…_amd64.AppImage` | `chmod +x BambuGo_*.AppImage` e avvialo |
+
+**macOS** — l'app non è firmata con un certificato Apple, quindi al primo avvio macOS la blocca:
+apri *Impostazioni di Sistema → Privacy e sicurezza* e premi **Apri comunque**, oppure da Terminale:
 
 ```bash
 xattr -dr com.apple.quarantine /Applications/BambuGo.app
 ```
 
+**Windows** — l'installer non è firmato: se compare SmartScreen scegli *Ulteriori informazioni →
+Esegui comunque*. Al primo avvio consenti BambuGo nel firewall (serve per la ricerca in rete).
+Clicca l'icona nel tray (eventualmente nella freccia ^ accanto all'orologio) per aprire il pannello.
+
+**Linux** — l'icona compare nell'area di notifica; il clic apre un menu con *Apri BambuGo*.
+Su **GNOME** (Ubuntu ha già l'estensione, Fedora no) serve l'estensione
+[AppIndicator](https://extensions.gnome.org/extension/615/appindicator-support/); in alternativa
+riapri BambuGo dal menu delle applicazioni e il pannello si mostra. Su Arch, per l'icona nel tray
+serve il pacchetto `libayatana-appindicator`.
+
 ## Compilazione
 
-Servono i Command Line Tools di Xcode (`xcode-select --install`, Xcode completo non serve).
+**macOS** — servono i Command Line Tools di Xcode (`xcode-select --install`, Xcode completo non serve).
 
 ```bash
 cd BambuGo
@@ -61,14 +82,27 @@ cp -R build/BambuGo.app /Applications/
 open /Applications/BambuGo.app
 ```
 
+**Windows e Linux** — la versione per questi sistemi è nella cartella [`desktop/`](desktop) ed è fatta con
+[Tauri](https://tauri.app) (Rust + interfaccia web). Servono Rust, Node.js e, su Linux, le librerie di WebKitGTK
+(su Ubuntu/Debian: `sudo apt install libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev`).
+
+```bash
+cd desktop
+npm ci
+npx tauri build      # pacchetti in src-tauri/target/release/bundle/
+```
+
+Le release per tutti i sistemi le compila GitHub Actions.
+
 ## Configurazione
 
 1. Clicca l'icona nella barra dei menu e premi **Cerca in rete**: le stampanti che si
    annunciano in rete compaiono in elenco con nome, modello e IP. Se non ne trova,
    inserisci a mano IP e numero di serie.
 2. Inserisci l'**access code** (display della stampante: Impostazioni → Rete/WLAN).
-3. Concedi il permesso **Rete locale** quando macOS lo chiede
-   (Impostazioni di Sistema → Privacy e sicurezza → Rete locale).
+3. Su macOS concedi il permesso **Rete locale** quando lo chiede
+   (Impostazioni di Sistema → Privacy e sicurezza → Rete locale); su Windows consenti l'accesso
+   nel firewall.
 
 Conviene riservare l'IP della stampante nel DHCP del router, così non cambia.
 
@@ -114,12 +148,14 @@ e una barra in basso permette di mostrarli nel Finder. Rispetta la licenza di ci
 
 L'app si iscrive a `device/<seriale>/report` e chiede lo stato completo (`pushall`) alla
 connessione e quando premi "Aggiorna". I certificati della stampante sono self-signed e
-vengono accettati. L'access code è conservato nel Portachiavi.
+vengono accettati. Su macOS l'access code è conservato nel Portachiavi.
 
 ## Note
 
 - Dopo ogni ricompilazione macOS può chiedere di autorizzare l'accesso al Portachiavi
   (la firma ad-hoc cambia): scegli "Consenti sempre".
+- Su Windows e Linux le impostazioni sono in un file nella cartella di configurazione dell'utente
+  (`%APPDATA%\it.ifeldr.bambugo` oppure `~/.config/it.ifeldr.bambugo`); su Linux il file è leggibile solo dall'utente.
 - P1 e A1 accettano poche connessioni MQTT contemporanee: se hai già altre app collegate
   (es. Home Assistant) BambuGo potrebbe non riuscire a connettersi.
 - Gli unici comandi inviati alla stampante sono pausa, ripresa, interruzione e luce della camera.

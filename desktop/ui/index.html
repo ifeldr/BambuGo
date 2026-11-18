@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BambuGo</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main id="app">
+    <header class="header">
+      <div id="badge" class="badge"></div>
+      <div class="title">
+        <div id="name" class="name">BambuGo</div>
+        <div id="subtitle" class="subtitle"></div>
+      </div>
+      <button id="settingsButton" class="icon-button" title="Impostazioni" hidden></button>
+    </header>
+
+    <section id="settings" class="card" hidden></section>
+    <section id="dashboard"></section>
+
+    <footer class="footer">
+      <button id="modelsButton" class="pill-button" title="Esplora modelli pronti su MakerWorld, Printables e Thingiverse">
+        <span class="i i-globe"></span>Modelli online
+      </button>
+      <span class="spacer"></span>
+      <span id="lastUpdate" class="muted small" title="Ultimo aggiornamento"></span>
+      <button id="refreshButton" class="icon-button" title="Aggiorna"></button>
+      <button id="coffeeButton" class="icon-button" title="Offrimi un caffè su PayPal"></button>
+      <button id="quitButton" class="icon-button" title="Esci da BambuGo"></button>
+    </footer>
+  </main>
+
+  <div id="cameraFull" class="camera-full" hidden></div>
+  <script src="icons.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
