@@ -133,7 +133,8 @@ jobs:
       - name: Compila e crea i pacchetti
         run: |
           npm ci
-          npx tauri build
+          # I download degli strumenti per AppImage ogni tanto falliscono: un secondo tentativo.
+          npx tauri build || (sleep 20 && npx tauri build)
 
       - name: Raccogli i pacchetti
         shell: bash
